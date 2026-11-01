@@ -28,9 +28,11 @@ type savedFile struct {
 // hashes are cached (invalidated by size/mtime changes), so in the common case
 // nothing extra is hashed at all.
 type store struct {
-	dir   string
+	dirMu sync.RWMutex
+	dir   string     // upload folder; can change at runtime (menu bar "Change folder…")
 	mu    sync.Mutex // serialises duplicate check + final rename
 	cache map[string]hashEntry
+	act   *activity
 }
 
 type hashEntry struct {
@@ -40,7 +42,21 @@ type hashEntry struct {
 }
 
 func newStore(dir string) *store {
-	return &store{dir: dir, cache: map[string]hashEntry{}}
+	return &store{dir: dir, cache: map[string]hashEntry{}, act: newActivity()}
+}
+
+// Dir returns the current upload folder.
+func (s *store) Dir() string {
+	s.dirMu.RLock()
+	defer s.dirMu.RUnlock()
+	return s.dir
+}
+
+// SetDir switches the upload folder; uploads already in progress finish in the old one.
+func (s *store) SetDir(dir string) {
+	s.dirMu.Lock()
+	s.dir = dir
+	s.dirMu.Unlock()
 }
 
 func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
@@ -48,10 +64,11 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 	if err != nil {
 		return savedFile{}, err
 	}
+	dir := s.Dir() // fixed for this upload even if the folder is changed meanwhile
 
 	// Stream to a hidden temp file (hashing on the way) so a broken upload
 	// never appears under a real name.
-	tmp, err := os.CreateTemp(s.dir, ".upload-*.part")
+	tmp, err := os.CreateTemp(dir, ".upload-*.part")
 	if err != nil {
 		return savedFile{}, err
 	}
@@ -71,7 +88,7 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	existing, err := s.findDuplicate(size, res.SHA256)
+	existing, err := s.findDuplicate(dir, size, res.SHA256)
 	if err != nil {
 		return savedFile{}, fmt.Errorf("checking for duplicates: %w", err)
 	}
@@ -83,11 +100,11 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 	if err := os.Chmod(tmpPath, 0o644); err != nil { // CreateTemp uses 0600
 		return savedFile{}, err
 	}
-	final, err := claimName(s.dir, name)
+	final, err := claimName(dir, name)
 	if err != nil {
 		return savedFile{}, err
 	}
-	finalPath := filepath.Join(s.dir, final)
+	finalPath := filepath.Join(dir, final)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		os.Remove(finalPath)
 		return savedFile{}, err
@@ -101,8 +118,8 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 
 // findDuplicate returns the name of a file in dir with the given size and
 // hash, or "" if there is none. Must be called with s.mu held.
-func (s *store) findDuplicate(size int64, sum string) (string, error) {
-	entries, err := os.ReadDir(s.dir)
+func (s *store) findDuplicate(dir string, size int64, sum string) (string, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
 	}
@@ -114,7 +131,7 @@ func (s *store) findDuplicate(size int64, sum string) (string, error) {
 		if err != nil || info.Size() != size {
 			continue
 		}
-		path := filepath.Join(s.dir, e.Name())
+		path := filepath.Join(dir, e.Name())
 		existing, err := s.hashOf(path, info)
 		if err != nil {
 			continue // unreadable file: can't be a confirmed duplicate

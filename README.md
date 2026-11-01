@@ -14,9 +14,18 @@ make app ARCH=amd64   # Intel Macs
 Copy `pic-sync.app` to `/Applications` (or anywhere) and double-click it:
 
 1. A folder picker asks where to save the photos. It defaults to the folder you picked last time.
-2. A **pic-sync is running** window appears with the QR code, the phone URL and the upload folder. Scan the QR with the phone.
-3. **Open in browser** shows a bigger QR on a page in your browser, and **Stop** quits.
-   The app has no Dock icon, so this window is how you stop it. (If the QR window can't be shown on your macOS version, the app falls back to a plain dialog and opens the QR page in the browser instead.)
+2. pic-sync appears as an icon in the **menu bar** (top right) and runs in the background. The icon shows what it's doing:
+   - icon only: running, waiting for uploads
+   - **↑ 45%** or **↑ 12.3 MB**: receiving a file (**↑ 3 files** for several at once)
+   - **!**: an upload failed; open the menu to see the error (this clears the **!**)
+3. Click the icon for the menu:
+   - status, today's count (e.g. *Today: 148 received, 3 already on Mac · last 2 min ago*) and the last error, if any
+   - **Show QR code…**: a window with the QR code to scan with the phone, the phone address and the folder
+   - **Open QR page in browser**: the same, larger, in your browser
+   - **Open folder** in Finder, and **Change folder…** (new uploads go to the new folder right away)
+   - **Quit pic-sync**
+
+The menu bar item needs to be built on a Mac (`make app` there; it uses the Xcode command line tools, which come with `git`). An app built elsewhere, e.g. cross-compiled from Linux, falls back to a **pic-sync is running** window with the QR code and **Open in browser** / **Stop** buttons.
 
 The app keeps its settings in `~/Library/Application Support/pic-sync/config.json` (same format as below; `listen` sets the port) and writes a log to `~/Library/Logs/pic-sync.log`. The QR page is only served to the Mac itself, not to other devices on the LAN.
 
@@ -91,6 +100,6 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 ## Development
 
 ```sh
-make test                      # server
+make test                      # server tests + compile-check of the menu bar code
 cd android && gradle test      # Android unit tests (or run them from Android Studio)
 ```

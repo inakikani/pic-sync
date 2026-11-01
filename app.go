@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 func inAppBundle() bool {
@@ -86,14 +87,31 @@ func runApp(cfgPath string) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	statusURL := fmt.Sprintf("http://localhost:%d/status", port)
 
-	mux := newMux(cfg.UploadDir)
-	addStatusPage(mux, cfg.UploadDir, url)
+	st := newStore(cfg.UploadDir)
+	mux := newStoreMux(st)
+	addStatusPage(mux, st.Dir, url)
 	go func() {
 		fatalAlert("The server stopped", http.Serve(ln, mux))
 	}()
 
-	runningUI(cfg.UploadDir, url, statusURL)
+	if trayAvailable {
+		// Menu bar item (macOS builds with cgo, i.e. "make app" on a Mac).
+		runTray(&trayApp{st: st, phoneURL: url, statusURL: statusURL, cfgPath: cfgPath, cfg: cfg})
+	} else {
+		runningUI(cfg.UploadDir, url, statusURL)
+	}
 	log.Print("stopped by user")
+}
+
+// trayApp is the state of the menu bar UI (see tray.go).
+type trayApp struct {
+	st        *store
+	phoneURL  string
+	statusURL string
+	cfgPath   string
+	cfg       Config
+	busy      atomic.Bool  // a QR window or folder picker is open
+	errSeenAt atomic.Int64 // unix nanos when the menu was last opened
 }
 
 // runningUI shows the "pic-sync is running" window until the user presses Stop.
@@ -107,7 +125,7 @@ func runningUI(dir, phoneURL, statusURL string) {
 	if err == nil {
 		defer os.Remove(qrPath)
 		for {
-			button, err := qrAlert(msg, qrPath)
+			button, err := qrAlert(msg, qrPath, "Open in browser", "Stop")
 			if err != nil {
 				log.Printf("QR window unavailable, falling back to dialog: %v", err)
 				break
@@ -146,8 +164,9 @@ func writeTempQR(text string) (string, error) {
 }
 
 // qrAlertScript is JavaScript for Automation: it builds a native NSAlert with the
-// QR image as its accessory view. argv[0] = message, argv[1] = PNG path.
-// Buttons: "Open in browser" (default, Return key) and "Stop".
+// QR image as its accessory view. argv[0] = message, argv[1] = PNG path,
+// argv[2:] = button titles (the first is the default, Return key). It prints the
+// title of the button pressed.
 const qrAlertScript = `ObjC.import('AppKit');
 function run(argv) {
   var size = 264;
@@ -162,8 +181,8 @@ function run(argv) {
   alert.setMessageText($('pic-sync is running'));
   alert.setInformativeText($(argv[0]));
   alert.setAccessoryView(view);
-  alert.addButtonWithTitle($('Open in browser')); // 1000, default
-  alert.addButtonWithTitle($('Stop'));            // 1001
+  var buttons = argv.slice(2);
+  buttons.forEach(function (b) { alert.addButtonWithTitle($(b)); }); // 1000, 1001, ...
 
   // osascript is a command-line tool: it must declare itself an (accessory, no Dock
   // icon) app before its windows can come to the front.
@@ -180,24 +199,28 @@ function run(argv) {
   alert.window.setLevel(3); // NSFloatingWindowLevel
   alert.window.center;
   var response = alert.runModal;
-  return response == 1000 ? 'Open in browser' : 'Stop';
+  var i = response - 1000;
+  return (i >= 0 && i < buttons.length) ? buttons[i] : buttons[buttons.length - 1];
 }`
 
 // qrAlert shows the native QR window and returns the pressed button's title.
-func qrAlert(msg, qrPath string) (string, error) {
-	out, err := runOsascript([]string{"-l", "JavaScript", "-e", qrAlertScript}, msg, qrPath)
+func qrAlert(msg, qrPath string, buttons ...string) (string, error) {
+	args := append([]string{msg, qrPath}, buttons...)
+	out, err := runOsascript([]string{"-l", "JavaScript", "-e", qrAlertScript}, args...)
 	if err != nil {
 		return "", err
 	}
-	if out != "Open in browser" && out != "Stop" {
-		return "", fmt.Errorf("unexpected result %q", out)
+	for _, b := range buttons {
+		if out == b {
+			return out, nil
+		}
 	}
-	return out, nil
+	return "", fmt.Errorf("unexpected result %q", out)
 }
 
 // addStatusPage registers the Mac-side page showing the QR code. It is only
 // served to the Mac itself, never to devices on the LAN.
-func addStatusPage(mux *http.ServeMux, dir, phoneURL string) {
+func addStatusPage(mux *http.ServeMux, dir func() string, phoneURL string) {
 	localOnly := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			host, _, _ := net.SplitHostPort(r.RemoteAddr)
@@ -210,7 +233,7 @@ func addStatusPage(mux *http.ServeMux, dir, phoneURL string) {
 	}
 	mux.HandleFunc("GET /status", localOnly(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		statusTmpl.Execute(w, map[string]string{"URL": phoneURL, "Dir": dir})
+		statusTmpl.Execute(w, map[string]string{"URL": phoneURL, "Dir": dir()})
 	}))
 	mux.HandleFunc("GET /qr.png", localOnly(func(w http.ResponseWriter, r *http.Request) {
 		img, err := qrPNG(phoneURL, 16) // large source image; CSS scales it to the window
@@ -236,7 +259,7 @@ var statusTmpl = template.Must(template.New("status").Parse(`<!DOCTYPE html>
 <img src="/qr.png" alt="QR code for {{.URL}}">
 <p>or open <code>{{.URL}}</code></p>
 <p class="dir">Saving to {{.Dir}}</p>
-<p class="dir">Use the pic-sync dialog to stop the server.</p>
+<p class="dir">Quit pic-sync from its menu bar icon (or its window) to stop the server.</p>
 </body></html>`))
 
 var errCanceled = errors.New("canceled")
@@ -290,12 +313,24 @@ end run`, msg)
 }
 
 func fatalAlert(title string, err error) {
+	errorAlert(title, err)
+	os.Exit(1)
+}
+
+// errorAlert shows a critical alert and logs the error, without exiting.
+func errorAlert(title string, err error) {
 	log.Printf("%s: %v", title, err)
 	osascript(`on run argv
 	activate
 	display alert (item 1 of argv) message (item 2 of argv) as critical
 end run`, title, err.Error())
-	os.Exit(1)
+}
+
+// openPath opens a file or folder in Finder.
+func openPath(path string) {
+	if err := exec.Command("open", path).Run(); err != nil {
+		log.Printf("opening %s: %v", path, err)
+	}
 }
 
 func openBrowser(url string) {

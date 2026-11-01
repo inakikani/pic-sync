@@ -130,7 +130,10 @@ func startListening(cfg Config) (net.Listener, string, error) {
 }
 
 func newMux(dir string) *http.ServeMux {
-	st := newStore(dir)
+	return newStoreMux(newStore(dir))
+}
+
+func newStoreMux(st *store) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -148,6 +151,8 @@ func newMux(dir string) *http.ServeMux {
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
+	t := st.act.begin(r.ContentLength)
+	defer st.act.end(t)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		httpError(w, http.StatusBadRequest, "expected multipart/form-data")
@@ -160,6 +165,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 			break
 		}
 		if err != nil {
+			st.act.recordError("", fmt.Errorf("reading upload: %w", err))
 			httpError(w, http.StatusBadRequest, "reading upload: "+err.Error())
 			return
 		}
@@ -167,9 +173,11 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 			part.Close()
 			continue // ordinary form field
 		}
-		res, err := st.save(part.FileName(), part)
+		t.setName(part.FileName())
+		res, err := st.save(part.FileName(), t.reader(part))
 		part.Close()
 		if err != nil {
+			st.act.recordError(part.FileName(), err)
 			log.Printf("upload failed (%q): %v", part.FileName(), err)
 			httpError(w, http.StatusBadRequest, err.Error())
 			return
@@ -179,6 +187,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 		} else {
 			log.Printf("saved %s", res.Name)
 		}
+		st.act.recordSaved(res)
 		saved = append(saved, res)
 	}
 	if len(saved) == 0 {

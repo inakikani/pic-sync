@@ -191,7 +191,7 @@ func TestRenderQR(t *testing.T) {
 
 func TestStatusPageLocalOnly(t *testing.T) {
 	mux := newMux(t.TempDir())
-	addStatusPage(mux, "/photos", "http://192.168.1.5:8080")
+	addStatusPage(mux, func() string { return "/photos" }, "http://192.168.1.5:8080")
 	for _, tc := range []struct {
 		path, remote string
 		want         int
