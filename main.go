@@ -19,6 +19,9 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
+// apiVersion is bumped when the HTTP API changes incompatibly.
+const apiVersion = "1"
+
 type Config struct {
 	UploadDir string `json:"upload_dir"`
 	Listen    string `json:"listen"`
@@ -135,6 +138,11 @@ func newMux(dir string) *http.ServeMux {
 	})
 	mux.HandleFunc("POST /upload", func(w http.ResponseWriter, r *http.Request) {
 		handleUpload(w, r, st)
+	})
+	// Lets clients (the Android app) confirm they are talking to pic-sync.
+	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"app": "pic-sync", "version": apiVersion})
 	})
 	return mux
 }

@@ -345,3 +345,15 @@ func TestConcurrentIdenticalUploads(t *testing.T) {
 		t.Fatalf("expected exactly one file, got %v", names)
 	}
 }
+
+func TestAPIInfo(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newMux(t.TempDir()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/info", nil))
+	var info map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil || rec.Code != 200 {
+		t.Fatalf("status %d, body %s", rec.Code, rec.Body)
+	}
+	if info["app"] != "pic-sync" || info["version"] != "1" {
+		t.Fatalf("info = %v", info)
+	}
+}
