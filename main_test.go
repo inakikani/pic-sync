@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +13,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type upFile struct{ name, body string }
 
 func upload(t *testing.T, dir string, files ...upFile) *httptest.ResponseRecorder {
+	t.Helper()
+	return uploadTo(t, newMux(dir), files...)
+}
+
+func uploadTo(t *testing.T, mux http.Handler, files ...upFile) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -29,7 +40,7 @@ func upload(t *testing.T, dir string, files ...upFile) *httptest.ResponseRecorde
 	req := httptest.NewRequest(http.MethodPost, "/upload", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
-	newMux(dir).ServeHTTP(rec, req)
+	mux.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -92,7 +103,7 @@ func TestPathTraversalIsContained(t *testing.T) {
 	dir := filepath.Join(root, "uploads")
 	os.Mkdir(dir, 0o755)
 	upload(t, dir, upFile{"../../evil.jpg", "x"})
-	upload(t, dir, upFile{`..\..\evil2.jpg`, "x"})
+	upload(t, dir, upFile{`..\..\evil2.jpg`, "y"})
 	if got := listDir(t, root); !equal(got, []string{"uploads"}) {
 		t.Fatalf("file escaped upload dir: %v", got)
 	}
@@ -229,5 +240,108 @@ func TestResolveMode(t *testing.T) {
 	}
 	if _, err := resolveMode("gui", false); err == nil {
 		t.Error("expected error for invalid mode")
+	}
+}
+
+func decodeSaved(t *testing.T, rec *httptest.ResponseRecorder) []savedFile {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var resp struct{ Saved []savedFile }
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Saved
+}
+
+func TestResponseHasHashAndSize(t *testing.T) {
+	body := "some photo bytes"
+	got := decodeSaved(t, upload(t, t.TempDir(), upFile{"a.jpg", body}))
+	sum := sha256.Sum256([]byte(body))
+	want := savedFile{Name: "a.jpg", Original: "a.jpg", Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:])}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestDuplicateContentDifferentName(t *testing.T) {
+	dir := t.TempDir()
+	mux := newMux(dir) // same server instance, like a real run
+	post := func(f upFile) []savedFile { return decodeSaved(t, uploadTo(t, mux, f)) }
+
+	post(upFile{"IMG_001.jpg", "photo"})
+	got := post(upFile{"renamed.jpg", "photo"})
+	if !got[0].Duplicate || got[0].Name != "IMG_001.jpg" || got[0].Original != "renamed.jpg" {
+		t.Fatalf("got %+v", got[0])
+	}
+	if names := listDir(t, dir); !equal(names, []string{"IMG_001.jpg"}) {
+		t.Fatalf("files = %v", names)
+	}
+}
+
+func TestSameSizeDifferentContentIsSaved(t *testing.T) {
+	dir := t.TempDir()
+	upload(t, dir, upFile{"a.jpg", "aaaa"})
+	got := decodeSaved(t, upload(t, dir, upFile{"b.jpg", "bbbb"}))
+	if got[0].Duplicate {
+		t.Fatal("different content flagged as duplicate")
+	}
+	if names := listDir(t, dir); !equal(names, []string{"a.jpg", "b.jpg"}) {
+		t.Fatalf("files = %v", names)
+	}
+}
+
+func TestDuplicateOfPreexistingFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "old.jpg"), []byte("already here"), 0o644)
+	got := decodeSaved(t, upload(t, dir, upFile{"new.jpg", "already here"}))
+	if !got[0].Duplicate || got[0].Name != "old.jpg" {
+		t.Fatalf("got %+v", got[0])
+	}
+}
+
+func TestDuplicateWithinOneRequest(t *testing.T) {
+	dir := t.TempDir()
+	got := decodeSaved(t, upload(t, dir, upFile{"a.jpg", "same"}, upFile{"b.jpg", "same"}))
+	if got[0].Duplicate || !got[1].Duplicate || got[1].Name != "a.jpg" {
+		t.Fatalf("got %+v", got)
+	}
+	if names := listDir(t, dir); !equal(names, []string{"a.jpg"}) {
+		t.Fatalf("files = %v", names)
+	}
+}
+
+func TestModifiedFileIsRehashed(t *testing.T) {
+	dir := t.TempDir()
+	mux := newMux(dir)
+	decodeSaved(t, uploadTo(t, mux, upFile{"a.jpg", "AAAA"}))
+	// Replace the file's content (same size) behind the server's back.
+	path := filepath.Join(dir, "a.jpg")
+	os.WriteFile(path, []byte("BBBB"), 0o644)
+	os.Chtimes(path, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
+
+	if got := decodeSaved(t, uploadTo(t, mux, upFile{"x.jpg", "AAAA"})); got[0].Duplicate {
+		t.Fatal("stale cached hash used for modified file")
+	}
+	if got := decodeSaved(t, uploadTo(t, mux, upFile{"y.jpg", "BBBB"})); !got[0].Duplicate {
+		t.Fatal("modified file's new content not detected")
+	}
+}
+
+func TestConcurrentIdenticalUploads(t *testing.T) {
+	dir := t.TempDir()
+	mux := newMux(dir)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			uploadTo(t, mux, upFile{fmt.Sprintf("p%d.jpg", i), "identical"})
+		}(i)
+	}
+	wg.Wait()
+	if names := listDir(t, dir); len(names) != 1 {
+		t.Fatalf("expected exactly one file, got %v", names)
 	}
 }

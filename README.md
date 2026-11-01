@@ -60,6 +60,7 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 
 ## Behaviour
 
+- **Duplicates are detected by content, not name.** Each upload is SHA-256 hashed while it streams to disk and compared with existing files in `upload_dir` of the same size. If an identical file is already there, the upload is discarded and the page shows **already on Mac**. This works even for renamed copies and files you put in the folder yourself. Hashing happens during the transfer, so it doesn't noticeably slow uploads. A duplicate is still sent over the network before it's detected.
 - Existing files are never overwritten. A duplicate name is saved as `IMG_001 (1).jpg`, `IMG_001 (2).jpg`, and so on.
 - Uploads go to a hidden `.upload-*.part` temp file first and are renamed only once complete, so an interrupted upload leaves no partial file.
 - Directory parts of client filenames are stripped, and hidden/dot names are rejected.

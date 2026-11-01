@@ -20,12 +20,14 @@ The web upload page stays as it is. The app is an optional companion.
 - **`POST /upload`:** a multipart request. Every part with a filename is saved; the field name doesn't matter, and the web UI uses `file`.
   - Files are streamed to `.upload-*.part` and renamed when complete. Existing files are never overwritten: a name clash becomes `name (1).ext`.
   - Directory parts of the filename are stripped, and names starting with a dot are rejected (400).
-  - Response today: `{"saved": ["IMG_001.jpg"]}`. On error: `{"error": "..."}` with a 4xx status.
-  - `index.html` only reads `status` and `error`, never `saved`, so the response shape can change safely.
+  - Response: `{"saved": [{"name", "original", "size", "sha256", "duplicate"}]}`. On error: `{"error": "..."}` with a 4xx status.
+  - Duplicates (same SHA-256 as a file already in `upload_dir`) are not stored. `name` then points at the existing file.
 - **`GET /status`, `GET /qr.png`:** loopback only (404 for LAN clients). Used by the Mac app mode.
 - **No auth; plain HTTP.** Default listen address is `:8080`. The QR code encodes `http://<lan-ip>:<port>`.
 
 ## Part 1: Server changes (small, do first)
+
+> Items 1 and 3 are **done** (branch `dedupe-uploads`): every `saved` entry now has `name`, `original`, `size`, `sha256` and `duplicate`, and identical content is never stored twice (see `store.go`). Only item 2 (`/api/info`) and its test remain.
 
 1. **Return proof of receipt.** Hash with SHA-256 while streaming (`io.MultiWriter(tmp, hasher)` in `saveFile`) and change the response to:
    ```json

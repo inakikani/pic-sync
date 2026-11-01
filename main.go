@@ -127,24 +127,25 @@ func startListening(cfg Config) (net.Listener, string, error) {
 }
 
 func newMux(dir string) *http.ServeMux {
+	st := newStore(dir)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	})
 	mux.HandleFunc("POST /upload", func(w http.ResponseWriter, r *http.Request) {
-		handleUpload(w, r, dir)
+		handleUpload(w, r, st)
 	})
 	return mux
 }
 
-func handleUpload(w http.ResponseWriter, r *http.Request, dir string) {
+func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		httpError(w, http.StatusBadRequest, "expected multipart/form-data")
 		return
 	}
-	saved := []string{}
+	saved := []savedFile{}
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -158,15 +159,19 @@ func handleUpload(w http.ResponseWriter, r *http.Request, dir string) {
 			part.Close()
 			continue // ordinary form field
 		}
-		name, err := saveFile(dir, part.FileName(), part)
+		res, err := st.save(part.FileName(), part)
 		part.Close()
 		if err != nil {
 			log.Printf("upload failed (%q): %v", part.FileName(), err)
 			httpError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		log.Printf("saved %s", name)
-		saved = append(saved, name)
+		if res.Duplicate {
+			log.Printf("skipped %s: duplicate of %s", res.Original, res.Name)
+		} else {
+			log.Printf("saved %s", res.Name)
+		}
+		saved = append(saved, res)
 	}
 	if len(saved) == 0 {
 		httpError(w, http.StatusBadRequest, "no files in request")
@@ -183,43 +188,6 @@ func sanitizeName(raw string) (string, error) {
 		return "", fmt.Errorf("invalid filename %q", raw)
 	}
 	return name, nil
-}
-
-// saveFile streams src into dir under a unique version of rawName and returns the final name.
-func saveFile(dir, rawName string, src io.Reader) (string, error) {
-	name, err := sanitizeName(rawName)
-	if err != nil {
-		return "", err
-	}
-
-	// Stream to a temp file first so a broken upload never appears under a real name.
-	tmp, err := os.CreateTemp(dir, ".upload-*.part")
-	if err != nil {
-		return "", err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op after successful rename
-	if _, err := io.Copy(tmp, src); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("writing file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(tmpPath, 0o644); err != nil { // CreateTemp uses 0600
-		return "", err
-	}
-
-	// Atomically claim a free final name, then move the data into it.
-	final, err := claimName(dir, name)
-	if err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmpPath, filepath.Join(dir, final)); err != nil {
-		os.Remove(filepath.Join(dir, final))
-		return "", err
-	}
-	return final, nil
 }
 
 // claimName creates an empty placeholder for name, or "stem (N).ext" if taken.
