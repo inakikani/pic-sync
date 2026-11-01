@@ -211,3 +211,23 @@ func TestAppConfigRoundTrip(t *testing.T) {
 		t.Fatalf("loaded = %+v", cfg)
 	}
 }
+
+func TestResolveMode(t *testing.T) {
+	for _, tc := range []struct {
+		mode     string
+		inBundle bool
+		want     string
+	}{
+		{"auto", false, "cli"},
+		{"auto", true, "app"},
+		{"cli", true, "cli"},
+		{"app", false, "app"},
+	} {
+		if got, err := resolveMode(tc.mode, tc.inBundle); err != nil || got != tc.want {
+			t.Errorf("resolveMode(%q, %v) = %q, %v; want %q", tc.mode, tc.inBundle, got, err, tc.want)
+		}
+	}
+	if _, err := resolveMode("gui", false); err == nil {
+		t.Error("expected error for invalid mode")
+	}
+}

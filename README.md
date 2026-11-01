@@ -22,6 +22,23 @@ The app keeps its settings in `~/Library/Application Support/pic-sync/config.jso
 
 The app is not signed with an Apple developer ID. If macOS refuses to open it, right-click it and choose **Open** once, or run `xattr -cr pic-sync.app`. On the Mac you can also ad-hoc sign it with `make sign`.
 
+## Choosing the UX
+
+Both UXs are in the same binary. Pick one with `-mode`:
+
+| `-mode` | UX |
+|---------|----|
+| `auto` (default) | app UX when launched from `pic-sync.app`, CLI otherwise |
+| `cli`  | terminal: folder from the config file, QR code printed in the terminal |
+| `app`  | folder picker dialog, QR page in the browser, running/Stop dialog |
+
+```sh
+./bin/pic-sync-darwin-arm64 -mode app                                    # app UX without the bundle
+bin/pic-sync.app/Contents/MacOS/pic-sync -mode cli -config config.json   # CLI from the bundle
+```
+
+In app mode, `-config` replaces the default `~/Library/Application Support/pic-sync/config.json`. The folder you choose is saved back to that file.
+
 ## Command line
 
 ```sh

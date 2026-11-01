@@ -51,13 +51,41 @@ func loadConfig(path string) (Config, error) {
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to JSON config file")
+	mode := flag.String("mode", "auto", `UX to use: "cli" (terminal + QR), "app" (macOS dialogs + browser QR page), or "auto" (app when launched from pic-sync.app, cli otherwise)`)
 	flag.Parse()
 
-	if inAppBundle() {
-		runApp()
+	configSet := false
+	flag.Visit(func(f *flag.Flag) { configSet = configSet || f.Name == "config" })
+
+	m, err := resolveMode(*mode, inAppBundle())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		flag.Usage()
+		os.Exit(2)
+	}
+	if m == "app" {
+		appConfig := ""
+		if configSet {
+			appConfig = *configPath
+		}
+		runApp(appConfig)
 		return
 	}
 	runCLI(*configPath)
+}
+
+// resolveMode turns the -mode flag into "cli" or "app".
+func resolveMode(mode string, inBundle bool) (string, error) {
+	switch mode {
+	case "cli", "app":
+		return mode, nil
+	case "auto", "":
+		if inBundle {
+			return "app", nil
+		}
+		return "cli", nil
+	}
+	return "", fmt.Errorf("invalid -mode %q: want cli, app or auto", mode)
 }
 
 func runCLI(configPath string) {

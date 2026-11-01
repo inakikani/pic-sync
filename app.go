@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"image/png"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -55,14 +56,18 @@ func saveAppConfig(path string, cfg Config) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-func runApp() {
+// runApp runs the dialog-driven UX. cfgPath overrides the default app config
+// location (~/Library/Application Support/pic-sync/config.json) when non-empty.
+func runApp(cfgPath string) {
 	home, _ := os.UserHomeDir()
 	if f, err := os.OpenFile(filepath.Join(home, "Library", "Logs", "pic-sync.log"),
 		os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
-		log.SetOutput(f)
+		log.SetOutput(io.MultiWriter(os.Stderr, f)) // stderr is visible when started from a terminal
 	}
 
-	cfgPath := filepath.Join(appSupportDir(), "config.json")
+	if cfgPath == "" {
+		cfgPath = filepath.Join(appSupportDir(), "config.json")
+	}
 	cfg := loadAppConfig(cfgPath)
 
 	dir, err := chooseFolder(cfg.UploadDir)
