@@ -71,8 +71,24 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 - On first run macOS may ask whether to allow incoming network connections. Choose **Allow**, or the phone won't be able to connect.
 - If you copied a binary that macOS refuses to open, clear the quarantine flag with `xattr -d com.apple.quarantine bin/pic-sync-darwin-arm64`.
 
+## Android companion app
+
+`android/` contains an optional Android app (Android 13+) that uploads photos to this server and can then **move the uploaded ones to the phone's trash**. The browser page can't delete anything on the phone; the app can.
+
+**Build and install:** open the `android/` folder in Android Studio, connect your phone (USB or wireless debugging) and press Run. Studio downloads Gradle 9.6.1 and the dependencies on first sync.
+
+**Using it:**
+1. Start pic-sync on the Mac. In the app, tap **Scan QR code** (or type the address).
+2. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
+3. Tap **Move N uploaded to trash**. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
+
+**Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
+
+**Permissions:** photos and videos (limited access works too), and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.
+
 ## Development
 
 ```sh
-make test
+make test                      # server
+cd android && gradle test      # Android unit tests (or run them from Android Studio)
 ```

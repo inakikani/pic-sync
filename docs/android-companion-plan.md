@@ -1,8 +1,20 @@
 # Plan: Android companion app (upload, then delete from phone)
 
-> Status: **not started**, written 2026-11-01. It will be built when the owner decides to go ahead.
-> For a future Claude session: read this file, `README.md`, `main.go` and `app.go` first.
-> The decisions under "Open decisions" have defaults; confirm them with the user before starting.
+> Status: **implemented** on branch `android-companion` (2026-11-01). It has not been built or run yet;
+> the first build and the device tests in "Verification" are done by the owner in Android Studio.
+>
+> Changes from the original plan, decided during implementation:
+> - **minSdk 33** (Android 13) instead of 30, at the owner's request. No legacy storage permission is needed.
+> - **targetSdk/compileSdk 37** (Android 17, the owner's phone). Android 17 blocks local network access
+>   by default, so the app declares and requests `ACCESS_LOCAL_NETWORK` at runtime (Nearby devices group).
+> - **HttpURLConnection** instead of OkHttp, and **SQLiteOpenHelper** instead of Room: fewer dependencies
+>   and no KSP/annotation processing. Upload records live in `uploads.db`.
+> - **Toolchain:** AGP 9.4.1 (built-in Kotlin), Kotlin/Compose compiler 2.4.21, Gradle 9.6.1, Compose BOM 2026.09.00.
+>   AGP 9.5.0 was skipped because it was released after the owner's Android Studio build.
+> - **Gradle wrapper:** only `gradle-wrapper.properties` is committed (no `gradlew` scripts or jar).
+>   Android Studio uses it directly; run `gradle wrapper` once to add the CLI scripts if wanted.
+> - Cleanup re-hashes an item if its MediaStore size or date_modified changed since upload, and only
+>   trashes it if the bytes still match. Otherwise it is skipped.
 
 ## Goal
 
