@@ -14,9 +14,9 @@ make app ARCH=amd64   # Intel Macs
 Copy `pic-sync.app` to `/Applications` (or anywhere) and double-click it:
 
 1. A folder picker asks where to save the photos. It defaults to the folder you picked last time.
-2. Your browser opens a page on the Mac with a large QR code. Scan it with the phone.
-3. A small **pic-sync is running** dialog stays open. **Show QR code** reopens the page, and **Stop** quits.
-   The app has no Dock icon, so this dialog is how you stop it.
+2. A **pic-sync is running** window appears with the QR code, the phone URL and the upload folder. Scan the QR with the phone.
+3. **Open in browser** shows a bigger QR on a page in your browser, and **Stop** quits.
+   The app has no Dock icon, so this window is how you stop it. (If the QR window can't be shown on your macOS version, the app falls back to a plain dialog and opens the QR page in the browser instead.)
 
 The app keeps its settings in `~/Library/Application Support/pic-sync/config.json` (same format as below; `listen` sets the port) and writes a log to `~/Library/Logs/pic-sync.log`. The QR page is only served to the Mac itself, not to other devices on the LAN.
 

@@ -92,16 +92,94 @@ func runApp(cfgPath string) {
 		fatalAlert("The server stopped", http.Serve(ln, mux))
 	}()
 
-	openBrowser(statusURL)
-	for {
-		switch runningDialog(cfg.UploadDir, url) {
-		case "Show QR code":
+	runningUI(cfg.UploadDir, url, statusURL)
+	log.Print("stopped by user")
+}
+
+// runningUI shows the "pic-sync is running" window until the user presses Stop.
+// It prefers a native alert with the QR code inside; if that can't be shown
+// (e.g. a scripting error on some macOS version) it falls back to the plain
+// AppleScript dialog plus the QR page in the browser.
+func runningUI(dir, phoneURL, statusURL string) {
+	msg := fmt.Sprintf("Scan with your phone, or open:\n%s\n\nPhotos are saved to:\n%s", phoneURL, dir)
+
+	qrPath, err := writeTempQR(phoneURL)
+	if err == nil {
+		defer os.Remove(qrPath)
+		for {
+			button, err := qrAlert(msg, qrPath)
+			if err != nil {
+				log.Printf("QR window unavailable, falling back to dialog: %v", err)
+				break
+			}
+			if button != "Open in browser" {
+				return // "Stop"
+			}
 			openBrowser(statusURL)
-		default: // "Stop", or the dialog failed
-			log.Print("stopped by user")
-			return
 		}
+	} else {
+		log.Printf("rendering QR image: %v", err)
 	}
+
+	openBrowser(statusURL)
+	for runningDialog(dir, phoneURL) == "Show QR code" {
+		openBrowser(statusURL)
+	}
+}
+
+// writeTempQR renders the QR code to a temporary PNG for the native alert.
+func writeTempQR(text string) (string, error) {
+	data, err := qrPNG(text, 16) // 33 modules * 16px = 528px, shown at 264pt (2x on Retina)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp("", "pic-sync-qr-*.png")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// qrAlertScript is JavaScript for Automation: it builds a native NSAlert with the
+// QR image as its accessory view. argv[0] = message, argv[1] = PNG path.
+// Buttons: "Open in browser" (default, Return key) and "Stop".
+const qrAlertScript = `ObjC.import('AppKit');
+function run(argv) {
+  var size = 264;
+  var img = $.NSImage.alloc.initWithContentsOfFile($(argv[1]));
+  if (!img || img.isNil()) { throw new Error('cannot load QR image'); }
+  img.setSize($.NSMakeSize(size, size));
+  var view = $.NSImageView.alloc.initWithFrame($.NSMakeRect(0, 0, size, size));
+  view.setImage(img);
+  view.setImageScaling(3); // NSImageScaleProportionallyUpOrDown
+
+  var alert = $.NSAlert.alloc.init;
+  alert.setMessageText($('pic-sync is running'));
+  alert.setInformativeText($(argv[0]));
+  alert.setAccessoryView(view);
+  alert.addButtonWithTitle($('Open in browser')); // 1000, default
+  alert.addButtonWithTitle($('Stop'));            // 1001
+
+  $.NSApplication.sharedApplication.activateIgnoringOtherApps(true);
+  var response = alert.runModal;
+  return response == 1000 ? 'Open in browser' : 'Stop';
+}`
+
+// qrAlert shows the native QR window and returns the pressed button's title.
+func qrAlert(msg, qrPath string) (string, error) {
+	out, err := runOsascript([]string{"-l", "JavaScript", "-e", qrAlertScript}, msg, qrPath)
+	if err != nil {
+		return "", err
+	}
+	if out != "Open in browser" && out != "Stop" {
+		return "", fmt.Errorf("unexpected result %q", out)
+	}
+	return out, nil
 }
 
 // addStatusPage registers the Mac-side page showing the QR code. It is only
@@ -153,7 +231,11 @@ var errCanceled = errors.New("canceled")
 // osascript runs an AppleScript, passing args via argv so they are never
 // interpolated into the script source.
 func osascript(script string, args ...string) (string, error) {
-	cmd := exec.Command("osascript", append([]string{"-e", script}, args...)...)
+	return runOsascript([]string{"-e", script}, args...)
+}
+
+func runOsascript(scriptArgs []string, args ...string) (string, error) {
+	cmd := exec.Command("osascript", append(scriptArgs, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
