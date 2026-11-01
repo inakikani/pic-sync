@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"image"
+	"image/png"
 	"net"
 	"strings"
 
@@ -48,4 +51,38 @@ func primaryIP() string {
 	}
 	defer conn.Close()
 	return conn.LocalAddr().(*net.UDPAddr).IP.String()
+}
+
+// qrPNG renders text as a PNG QR code with scale pixels per module and the
+// standard 4-module quiet zone. (rsc.io/qr's own Code.Image ignores Scale and
+// draws the code at 1px per module in the corner, so it can't be used.)
+func qrPNG(text string, scale int) ([]byte, error) {
+	code, err := qr.Encode(text, qr.M)
+	if err != nil {
+		return nil, err
+	}
+	const quiet = 4
+	side := (code.Size + 2*quiet) * scale
+	img := image.NewGray(image.Rect(0, 0, side, side))
+	for i := range img.Pix {
+		img.Pix[i] = 0xFF
+	}
+	for y := 0; y < code.Size; y++ {
+		for x := 0; x < code.Size; x++ {
+			if !code.Black(x, y) {
+				continue
+			}
+			for dy := 0; dy < scale; dy++ {
+				row := ((y+quiet)*scale + dy) * img.Stride
+				for dx := 0; dx < scale; dx++ {
+					img.Pix[row+(x+quiet)*scale+dx] = 0x00
+				}
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

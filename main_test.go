@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -359,5 +360,33 @@ func TestAPIInfo(t *testing.T) {
 	}
 	if info["app"] != "pic-sync" || info["version"] != "1" {
 		t.Fatalf("info = %v", info)
+	}
+}
+
+func TestQRPNGIsScaled(t *testing.T) {
+	data, err := qrPNG("http://192.168.1.23:8080", 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Version-2 code: 25 modules + 2*4 quiet zone = 33 modules * 16 px.
+	if b := img.Bounds(); b.Dx() != 33*16 || b.Dy() != 33*16 {
+		t.Fatalf("size = %v, want %dx%d", b, 33*16, 33*16)
+	}
+	dark := func(x, y int) bool { r, _, _, _ := img.At(x, y).RGBA(); return r < 0x8000 }
+	// Quiet zone is white; the top-left finder pattern starts right after it and spans 7 modules.
+	if dark(0, 0) || dark(4*16-1, 4*16-1) {
+		t.Fatal("quiet zone should be white")
+	}
+	for _, p := range [][2]int{{4*16 + 1, 4*16 + 1}, {(4+6)*16 + 8, (4+6)*16 + 8}, {(4+3)*16 + 8, (4+3)*16 + 8}} {
+		if !dark(p[0], p[1]) {
+			t.Fatalf("finder pattern pixel %v should be black", p)
+		}
+	}
+	if dark((4+1)*16+8, (4+1)*16+8) {
+		t.Fatal("finder pattern inner ring should be white")
 	}
 }

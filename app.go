@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"image/png"
 	"io"
 	"log"
 	"net"
@@ -19,8 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"rsc.io/qr"
 )
 
 func inAppBundle() bool {
@@ -125,16 +122,13 @@ func addStatusPage(mux *http.ServeMux, dir, phoneURL string) {
 		statusTmpl.Execute(w, map[string]string{"URL": phoneURL, "Dir": dir})
 	}))
 	mux.HandleFunc("GET /qr.png", localOnly(func(w http.ResponseWriter, r *http.Request) {
-		code, err := qr.Encode(phoneURL, qr.M)
+		img, err := qrPNG(phoneURL, 16) // large source image; CSS scales it to the window
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		code.Scale = 10
-		var buf bytes.Buffer
-		png.Encode(&buf, code.Image())
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(buf.Bytes())
+		w.Write(img)
 	}))
 }
 
@@ -142,7 +136,7 @@ var statusTmpl = template.Must(template.New("status").Parse(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>pic-sync</title>
 <style>
  body { font-family: system-ui, sans-serif; text-align: center; padding: 2rem; }
- img { width: 320px; height: 320px; image-rendering: pixelated; border: 16px solid #fff; }
+ img { width: min(70vmin, 520px); height: auto; image-rendering: pixelated; border-radius: 8px; }
  code { font-size: 1.2rem; }
  .dir { color: #555; }
 </style></head>
