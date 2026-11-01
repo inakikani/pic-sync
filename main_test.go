@@ -172,3 +172,42 @@ func TestRenderQR(t *testing.T) {
 		t.Fatalf("unexpected QR output (%d lines)", len(lines))
 	}
 }
+
+func TestStatusPageLocalOnly(t *testing.T) {
+	mux := newMux(t.TempDir())
+	addStatusPage(mux, "/photos", "http://192.168.1.5:8080")
+	for _, tc := range []struct {
+		path, remote string
+		want         int
+	}{
+		{"/status", "127.0.0.1:5000", http.StatusOK},
+		{"/status", "[::1]:5000", http.StatusOK},
+		{"/qr.png", "127.0.0.1:5000", http.StatusOK},
+		{"/status", "192.168.1.20:5000", http.StatusNotFound},
+		{"/qr.png", "192.168.1.20:5000", http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.RemoteAddr = tc.remote
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s from %s: status %d, want %d", tc.path, tc.remote, rec.Code, tc.want)
+		}
+		if tc.path == "/status" && rec.Code == 200 && !strings.Contains(rec.Body.String(), "http://192.168.1.5:8080") {
+			t.Error("status page missing phone URL")
+		}
+	}
+}
+
+func TestAppConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "config.json")
+	if cfg := loadAppConfig(path); cfg.Listen != ":8080" || cfg.UploadDir != "" {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+	if err := saveAppConfig(path, Config{UploadDir: "/x", Listen: ":9000"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := loadAppConfig(path); cfg.UploadDir != "/x" || cfg.Listen != ":9000" {
+		t.Fatalf("loaded = %+v", cfg)
+	}
+}

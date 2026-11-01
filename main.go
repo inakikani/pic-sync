@@ -53,17 +53,37 @@ func main() {
 	configPath := flag.String("config", "config.json", "path to JSON config file")
 	flag.Parse()
 
-	cfg, err := loadConfig(*configPath)
+	if inAppBundle() {
+		runApp()
+		return
+	}
+	runCLI(*configPath)
+}
+
+func runCLI(configPath string) {
+	cfg, err := loadConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
-		log.Fatalf("creating upload_dir: %v", err)
+	ln, url, err := startListening(cfg)
+	if err != nil {
+		log.Fatal(err)
 	}
+	if art, err := renderQR(url); err == nil {
+		fmt.Printf("\nScan to open %s\n\n%s\n", url, art)
+	}
+	log.Fatal(http.Serve(ln, newMux(cfg.UploadDir)))
+}
 
+// startListening creates the upload dir, opens the listener, logs every LAN URL
+// and returns the URL most likely reachable from the phone.
+func startListening(cfg Config) (net.Listener, string, error) {
+	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
+		return nil, "", fmt.Errorf("creating upload folder: %w", err)
+	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
-		log.Fatal(err)
+		return nil, "", err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	log.Printf("saving uploads to %s", cfg.UploadDir)
@@ -75,11 +95,7 @@ func main() {
 	if p := primaryIP(); p != "" {
 		qrIP = p
 	}
-	url := fmt.Sprintf("http://%s:%d", qrIP, port)
-	if art, err := renderQR(url); err == nil {
-		fmt.Printf("\nScan to open %s\n\n%s\n", url, art)
-	}
-	log.Fatal(http.Serve(ln, newMux(cfg.UploadDir)))
+	return ln, fmt.Sprintf("http://%s:%d", qrIP, port), nil
 }
 
 func newMux(dir string) *http.ServeMux {
