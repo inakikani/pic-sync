@@ -165,7 +165,20 @@ function run(argv) {
   alert.addButtonWithTitle($('Open in browser')); // 1000, default
   alert.addButtonWithTitle($('Stop'));            // 1001
 
-  $.NSApplication.sharedApplication.activateIgnoringOtherApps(true);
+  // osascript is a command-line tool: it must declare itself an (accessory, no Dock
+  // icon) app before its windows can come to the front.
+  var nsapp = $.NSApplication.sharedApplication;
+  nsapp.setActivationPolicy(1); // NSApplicationActivationPolicyAccessory
+  // Bring osascript forward the same way AppleScript's "activate" does (this is what
+  // makes the plain dialogs appear); the AppKit call alone is ignored on macOS 14+.
+  var self = Application.currentApplication();
+  self.includeStandardAdditions = true;
+  self.activate();
+  nsapp.activateIgnoringOtherApps(true);
+  // Even if activation is refused, float above normal windows so it can't hide.
+  alert.layout;
+  alert.window.setLevel(3); // NSFloatingWindowLevel
+  alert.window.center;
   var response = alert.runModal;
   return response == 1000 ? 'Open in browser' : 'Stop';
 }`
