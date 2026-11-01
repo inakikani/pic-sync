@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.inakikani.picsync.data.Album
+import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
 import com.inakikani.picsync.data.MediaRepository
 import com.inakikani.picsync.data.ServerClient
@@ -30,8 +31,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.time.ZonedDateTime
 
 data class UploadProgress(val index: Int, val total: Int, val currentId: Long, val fraction: Float)
+
+/** Album + filters predicate; used for the gallery and again, freshly, for trashing. */
+fun scopeMatcher(album: Long?, filters: MediaFilters): (MediaItem) -> Boolean {
+    val match = filters.matcher(ZonedDateTime.now())
+    return { item -> (album == null || item.albumId == album) && match(item) }
+}
 
 data class UiState(
     val serverUrl: String? = null,
@@ -44,6 +52,7 @@ data class UiState(
     val selected: Set<Long> = emptySet(),
     val onlyNotUploaded: Boolean = false,
     val selectedAlbum: Long? = null, // null = all photos
+    val filters: MediaFilters = MediaFilters(),
     val upload: UploadProgress? = null,
     val busy: String? = null,
     val message: String? = null,
@@ -53,12 +62,14 @@ data class UiState(
     }
     val albumName: String? get() = selectedAlbum?.let { id -> albums.firstOrNull { it.id == id }?.name }
 
-    // Everything below is scoped to the selected album (or all photos).
-    val inAlbum: List<MediaItem> by lazy {
-        selectedAlbum?.let { album -> media.filter { it.albumId == album } } ?: media
-    }
-    val notUploaded: List<MediaItem> by lazy { inAlbum.filter { it.id !in records } }
-    val uploadedOnPhone: Int by lazy { inAlbum.count { it.id in records } }
+    // Everything below is scoped to the selected album (or all photos) and the filters.
+    val inScope: List<MediaItem> by lazy { media.filter(scopeMatcher(selectedAlbum, filters)) }
+    val notUploaded: List<MediaItem> by lazy { inScope.filter { it.id !in records } }
+    val uploadedOnPhone: Int by lazy { inScope.count { it.id in records } }
+
+    /** " from Camera", " from Camera (filtered)", " (filtered)" or "" for button/dialog texts. */
+    val scopeLabel: String
+        get() = (albumName?.let { " from $it" } ?: "") + (if (filters.isActive) " (filtered)" else "")
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -75,7 +86,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var lastReported = -1f
     private var pendingTrash = 0
     private var pendingSkipped = 0
-    private var pendingAlbum: String? = null
+    private var pendingScope = ""
 
     // ---- server ----
 
@@ -144,6 +155,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
     fun setOnlyNotUploaded(only: Boolean) = _state.update { it.copy(onlyNotUploaded = only) }
     fun selectAlbum(id: Long?) = _state.update { it.copy(selectedAlbum = id) }
+    fun setFilters(filters: MediaFilters) = _state.update { it.copy(filters = filters) }
     fun showMessage(msg: String) = _state.update { it.copy(message = msg) }
     fun dismissMessage() = _state.update { it.copy(message = null) }
 
@@ -244,17 +256,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun canManageMedia(): Boolean = MediaStore.canManageMedia(getApplication<Application>())
 
     /**
-     * Builds the system trash request for verified uploads still on the phone (in the
-     * selected album, if any), or returns null if there's nothing to trash. Items whose MediaStore metadata changed since upload
+     * Builds the system trash request for verified uploads still on the phone that are in
+     * the current scope (album + filters), or returns null if there's nothing to trash. Items whose MediaStore metadata changed since upload
      * are re-hashed and only included if their bytes still match what the Mac confirmed.
      */
     suspend fun prepareTrash(): IntentSender? {
-        val album = _state.value.selectedAlbum
-        pendingAlbum = _state.value.albumName
+        val scope = _state.value
+        val inScope = scopeMatcher(scope.selectedAlbum, scope.filters)
+        pendingScope = scope.scopeLabel
         _state.update { it.copy(busy = "Checking files…") }
         try {
             val (uris, skipped) = withContext(Dispatchers.IO) {
-                val media = repo.query().filter { album == null || it.albumId == album }
+                val media = repo.query().filter(inScope)
                 val records = store.all()
                 val uris = ArrayList<Uri>()
                 var skipped = 0
@@ -292,7 +305,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onTrashResult(ok: Boolean) {
         showMessage(
             if (ok) {
-                "Moved $pendingTrash item(s)" + (pendingAlbum?.let { " from $it" } ?: "") +
+                "Moved $pendingTrash item(s)$pendingScope" +
                     " to trash (recoverable for 30 days)" +
                     (if (pendingSkipped > 0) ". Skipped $pendingSkipped changed after upload." else "")
             } else {

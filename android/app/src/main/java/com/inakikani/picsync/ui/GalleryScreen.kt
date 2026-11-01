@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.inakikani.picsync.data.Album
+import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
 import kotlinx.coroutines.launch
 
@@ -162,8 +163,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
             title = { Text("Move to trash?") },
             text = {
                 Text(
-                    "Move ${state.uploadedOnPhone} uploaded item(s)" +
-                        (state.albumName?.let { " from $it" } ?: "") + " to the phone's trash? " +
+                    "Move ${state.uploadedOnPhone} uploaded item(s)${state.scopeLabel} to the phone's trash? " +
                         "They stay recoverable there for 30 days.",
                 )
             },
@@ -242,28 +242,54 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             AlbumRow(state.albums, state.selectedAlbum, state.media.size, onSelect = vm::selectAlbum)
         }
 
+        var showFilters by remember { mutableStateOf(false) }
         Row(
-            Modifier.padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
                 selected = !state.onlyNotUploaded,
                 onClick = { vm.setOnlyNotUploaded(false) },
-                label = { Text("All (${state.inAlbum.size})") },
+                label = { Text("All (${state.inScope.size})") },
             )
             FilterChip(
                 selected = state.onlyNotUploaded,
                 onClick = { vm.setOnlyNotUploaded(true) },
                 label = { Text("Not uploaded (${state.notUploaded.size})") },
             )
+            Spacer(Modifier.weight(1f))
+            FilterChip(
+                selected = state.filters.isActive,
+                onClick = { showFilters = true },
+                label = {
+                    Text(if (state.filters.isActive) "Filters (${state.filters.activeCount})" else "Filters")
+                },
+            )
+        }
+        if (state.filters.isActive) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    state.filters.summary(),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { vm.setFilters(MediaFilters()) }) { Text("Clear") }
+            }
+        }
+        if (showFilters) {
+            FiltersSheet(state.filters, onChange = vm::setFilters, onDismiss = { showFilters = false })
         }
 
-        val visible = if (state.onlyNotUploaded) state.notUploaded else state.inAlbum
+        val visible = if (state.onlyNotUploaded) state.notUploaded else state.inScope
         when {
             !state.mediaLoaded -> Centered { CircularProgressIndicator() }
             visible.isEmpty() -> Centered {
                 Text(
                     when {
+                        state.filters.isActive && state.inScope.isEmpty() -> "Nothing matches the filters"
                         state.onlyNotUploaded -> "Everything ${state.albumName?.let { "in $it " } ?: ""}is uploaded"
                         else -> "No photos or videos found"
                     },
@@ -392,10 +418,7 @@ private fun IdleActions(
         }
         if (state.uploadedOnPhone > 0) {
             FilledTonalButton(onClick = onTrash, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "Move ${state.uploadedOnPhone} uploaded" +
-                        (state.albumName?.let { " from $it" } ?: "") + " to trash",
-                )
+                Text("Move ${state.uploadedOnPhone} uploaded${state.scopeLabel} to trash")
             }
         }
     }

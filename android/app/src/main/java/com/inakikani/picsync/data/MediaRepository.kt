@@ -13,12 +13,13 @@ data class MediaItem(
     val uri: Uri,
     val name: String,
     val mimeType: String,
-    val size: Long,
+    override val size: Long,
     val dateModified: Long, // seconds since epoch
-    val isVideo: Boolean,
+    override val takenAt: Long, // millis: DATE_TAKEN, or DATE_ADDED if the file has none
+    override val isVideo: Boolean,
     val albumId: Long,      // MediaStore bucket (on-device folder)
     val albumName: String,
-) {
+) : Filterable {
     val snapshot get() = MediaSnapshot(size, dateModified)
 }
 
@@ -33,6 +34,8 @@ class MediaRepository(private val resolver: ContentResolver) {
             MediaStore.Files.FileColumns.MIME_TYPE,
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.DATE_MODIFIED,
+            MediaStore.Files.FileColumns.DATE_TAKEN,
+            MediaStore.Files.FileColumns.DATE_ADDED,
             MediaStore.Files.FileColumns.MEDIA_TYPE,
             MediaStore.Files.FileColumns.BUCKET_ID,
             MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
@@ -52,6 +55,8 @@ class MediaRepository(private val resolver: ContentResolver) {
             val mimeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
             val sizeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
             val modCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+            val takenCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_TAKEN)
+            val addedCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
             val typeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
             val bucketCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_ID)
             val bucketNameCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME)
@@ -71,6 +76,8 @@ class MediaRepository(private val resolver: ContentResolver) {
                     mimeType = c.getString(mimeCol) ?: "",
                     size = c.getLong(sizeCol),
                     dateModified = c.getLong(modCol),
+                    takenAt = c.getLong(takenCol).takeIf { !c.isNull(takenCol) && it > 0 }
+                        ?: (c.getLong(addedCol) * 1000), // DATE_ADDED is in seconds
                     isVideo = isVideo,
                     albumId = if (c.isNull(bucketCol)) 0L else c.getLong(bucketCol),
                     albumName = c.getString(bucketNameCol) ?: "Other",
