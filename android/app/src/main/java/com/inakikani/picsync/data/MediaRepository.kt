@@ -16,6 +16,8 @@ data class MediaItem(
     val size: Long,
     val dateModified: Long, // seconds since epoch
     val isVideo: Boolean,
+    val albumId: Long,      // MediaStore bucket (on-device folder)
+    val albumName: String,
 ) {
     val snapshot get() = MediaSnapshot(size, dateModified)
 }
@@ -32,6 +34,8 @@ class MediaRepository(private val resolver: ContentResolver) {
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.DATE_MODIFIED,
             MediaStore.Files.FileColumns.MEDIA_TYPE,
+            MediaStore.Files.FileColumns.BUCKET_ID,
+            MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
         )
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
         val args = arrayOf(
@@ -49,6 +53,8 @@ class MediaRepository(private val resolver: ContentResolver) {
             val sizeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
             val modCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
             val typeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+            val bucketCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_ID)
+            val bucketNameCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME)
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 val isVideo = c.getInt(typeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
@@ -66,6 +72,8 @@ class MediaRepository(private val resolver: ContentResolver) {
                     size = c.getLong(sizeCol),
                     dateModified = c.getLong(modCol),
                     isVideo = isVideo,
+                    albumId = if (c.isNull(bucketCol)) 0L else c.getLong(bucketCol),
+                    albumName = c.getString(bucketNameCol) ?: "Other",
                 )
             }
         }

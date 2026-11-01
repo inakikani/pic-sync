@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -63,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import com.inakikani.picsync.data.Album
 import com.inakikani.picsync.data.MediaItem
 import kotlinx.coroutines.launch
 
@@ -159,7 +162,8 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
             title = { Text("Move to trash?") },
             text = {
                 Text(
-                    "Move ${state.uploadedOnPhone} uploaded item(s) to the phone's trash? " +
+                    "Move ${state.uploadedOnPhone} uploaded item(s)" +
+                        (state.albumName?.let { " from $it" } ?: "") + " to the phone's trash? " +
                         "They stay recoverable there for 30 days.",
                 )
             },
@@ -234,6 +238,10 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             }
         }
 
+        if (state.albums.isNotEmpty()) {
+            AlbumRow(state.albums, state.selectedAlbum, state.media.size, onSelect = vm::selectAlbum)
+        }
+
         Row(
             Modifier.padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -241,7 +249,7 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             FilterChip(
                 selected = !state.onlyNotUploaded,
                 onClick = { vm.setOnlyNotUploaded(false) },
-                label = { Text("All (${state.media.size})") },
+                label = { Text("All (${state.inAlbum.size})") },
             )
             FilterChip(
                 selected = state.onlyNotUploaded,
@@ -250,11 +258,16 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             )
         }
 
-        val visible = if (state.onlyNotUploaded) state.notUploaded else state.media
+        val visible = if (state.onlyNotUploaded) state.notUploaded else state.inAlbum
         when {
             !state.mediaLoaded -> Centered { CircularProgressIndicator() }
             visible.isEmpty() -> Centered {
-                Text(if (state.onlyNotUploaded) "Everything is uploaded" else "No photos or videos found")
+                Text(
+                    when {
+                        state.onlyNotUploaded -> "Everything ${state.albumName?.let { "in $it " } ?: ""}is uploaded"
+                        else -> "No photos or videos found"
+                    },
+                )
             }
             else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 110.dp),
@@ -276,6 +289,49 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             }
         }
     }
+}
+
+/** Horizontal album picker. Each chip shows the album size and a badge with items left to upload. */
+@Composable
+private fun AlbumRow(albums: List<Album>, selected: Long?, total: Int, onSelect: (Long?) -> Unit) {
+    val pendingTotal = albums.sumOf { it.notUploaded }
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item(key = "all") {
+            AlbumChip("All photos", total, pendingTotal, selected == null) { onSelect(null) }
+        }
+        rowItems(albums, key = { it.id }) { album ->
+            AlbumChip(album.name, album.count, album.notUploaded, selected == album.id) { onSelect(album.id) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AlbumChip(name: String, count: Int, pending: Int, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text("$name ($count)") },
+        trailingIcon = if (pending > 0) {
+            {
+                Box(
+                    Modifier.background(MaterialTheme.colorScheme.tertiary, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 6.dp),
+                ) {
+                    Text(
+                        pending.toString(),
+                        color = MaterialTheme.colorScheme.onTertiary,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        } else {
+            null
+        },
+    )
 }
 
 @Composable
@@ -336,7 +392,10 @@ private fun IdleActions(
         }
         if (state.uploadedOnPhone > 0) {
             FilledTonalButton(onClick = onTrash, modifier = Modifier.fillMaxWidth()) {
-                Text("Move ${state.uploadedOnPhone} uploaded to trash")
+                Text(
+                    "Move ${state.uploadedOnPhone} uploaded" +
+                        (state.albumName?.let { " from $it" } ?: "") + " to trash",
+                )
             }
         }
     }

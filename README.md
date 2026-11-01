@@ -79,8 +79,9 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 
 **Using it:**
 1. Start pic-sync on the Mac. In the app, tap **Scan QR code** (or type the address).
-2. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
-3. Tap **Move N uploaded to trash**. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
+2. Optionally pick an **album** (Camera, Screenshots, WhatsApp Images, …) from the row at the top. Each one shows how many items still need uploading. Cloud-only Google Photos albums aren't visible to other apps, so only on-device folders appear.
+3. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
+4. Tap **Move N uploaded to trash**. This applies to the album you're viewing, or to everything under *All photos*. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
 
 **Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
 
