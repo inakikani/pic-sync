@@ -141,6 +141,10 @@ func TestIndexServed(t *testing.T) {
 	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`type="file"`)) {
 		t.Fatalf("index: status %d", rec.Code)
 	}
+	// iOS only sends original HEIC photos (instead of JPEG conversions) if the page lists them.
+	if !bytes.Contains(rec.Body.Bytes(), []byte("image/heic,image/heif")) {
+		t.Fatal("file input should accept image/heic and image/heif")
+	}
 }
 
 func TestLoadConfig(t *testing.T) {

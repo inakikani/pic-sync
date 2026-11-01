@@ -15,11 +15,15 @@
   li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ok { color: #16a34a; } .err { color: #dc2626; } .dup { color: #ca8a04; }
   #summary { font-weight: bold; }
+  .hint { font-size: .8rem; color: #6b7280; margin: 0; }
 </style>
 </head>
 <body>
 <h1>Upload photos</h1>
-<input id="files" type="file" multiple accept="image/*,video/*">
+<!-- Listing HEIC/HEIF explicitly tells iOS the page accepts Apple's formats, so it sends the
+     original photos instead of converting each one to JPEG (slow, and not the original file). -->
+<input id="files" type="file" multiple accept="image/*,video/*,image/heic,image/heif,.heic,.heif">
+<p class="hint">On iPhone, after tapping <b>Add</b>, iOS may take a moment to prepare large selections or photos stored in iCloud.</p>
 <button id="go" disabled>Upload</button>
 <p id="summary"></p>
 <ul id="list"></ul>
