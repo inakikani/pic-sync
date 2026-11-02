@@ -96,10 +96,9 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         AppLog.i("permissions: asking for photos/videos + media location ($why)")
         mediaLauncher.launch(mediaPermissions())
     }
-    // Only ask automatically when there's no photo access at all. Media location has no
-    // dialog of its own: requested alone at launch (installs that already had photo access),
-    // Android 17 left an invisible permission screen on top of the app, i.e. a blank screen.
-    // It's offered in Settings instead.
+    // Only ask automatically when there's no photo access at all (photos + location
+    // together). Installs that already had photo access can allow location in Settings,
+    // so a limited-access user isn't shown the photo selection again at every launch.
     LaunchedEffect(Unit) {
         AppLog.i("startup: gallery shown, photo access $access")
         if (access == MediaAccess.NONE) askMediaPermissions("no photo access yet")

@@ -114,8 +114,9 @@ On the phone:
 - **Nothing visible at all:** check `~/Library/Logs/pic-sync.log` for the startup line and errors, or run `pic-sync.app/Contents/MacOS/pic-sync` in Terminal to see the log live.
 
 **Android app shows only a blank screen**
-- Press **Back**. If the gallery appears, a permission screen without a dialog was stuck on top: Android 17 did that when media location was requested on its own at launch. Since that fix, the app never asks for it automatically when photo access already exists.
-- Otherwise look in Logcat (`package:com.inakikani.picsync`) for a `FATAL EXCEPTION`, or for the last `pic-sync` line before it stopped.
+- In Logcat, filter on `tag:pic-sync`. A normal start logs `startup: activity created`, `building the first screen`, `view model created` and `first frame drawn`. The last line shows how far it got.
+- If the app is stuck, a `watchdog: main thread blocked …` entry follows within a few seconds. It shows the code the app is stuck in.
+- Also check for a `FATAL EXCEPTION` (filter `package:com.inakikani.picsync`).
 
 **Android app crashes**
 - The crash and its stack trace are in the app log. After reopening the app, use **Share diagnostics**, or check Logcat in Android Studio.

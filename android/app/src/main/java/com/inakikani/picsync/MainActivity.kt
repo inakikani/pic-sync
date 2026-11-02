@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             remember { AppLog.i("startup: building the first screen"); 0 }
-            PicSyncTheme { PicSyncApp() }
+            PicSyncTheme { AppContent() }
         }
         var drawn = false
         window.decorView.viewTreeObserver.addOnDrawListener {
@@ -40,8 +40,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Not named PicSyncApp: that's the Application class, and a call to PicSyncApp()
+// would construct it instead of composing anything (that was a blank-screen bug).
 @Composable
-private fun PicSyncApp() {
+private fun AppContent() {
     remember { AppLog.i("startup: getting the view model"); 0 }
     val vm: AppViewModel = viewModel()
     val state by vm.state.collectAsStateWithLifecycle()
