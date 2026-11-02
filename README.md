@@ -116,6 +116,8 @@ The app follows Android 16/17's design language, Material 3 Expressive. It uses 
 
 **Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
 
+**Other devices:** in the app, **Settings → Show QR code for the upload page** shows the Mac's address as a QR code at full screen brightness. Another phone or tablet on the same Wi-Fi (an iPhone, say) can scan it with its camera and upload from its browser, without going to the Mac.
+
 **Permissions:** photos and videos (limited access works too) including their location, so uploads keep GPS data, and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.
 
 ## Logs and troubleshooting

@@ -163,6 +163,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
     var confirmTrash by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showFailures by remember { mutableStateOf(false) }
+    var showServerQr by remember { mutableStateOf(false) }
     fun runTrash() {
         scope.launch {
             vm.prepareTrash()?.let { trashLauncher.launch(IntentSenderRequest.Builder(it).build()) }
@@ -229,6 +230,10 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         )
     }
 
+    if (showServerQr) {
+        state.serverUrl?.let { ServerQrDialog(it, onDismiss = { showServerQr = false }) }
+    }
+
     if (showFailures) {
         AlertDialog(
             onDismissRequest = { showFailures = false },
@@ -258,6 +263,16 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Server", style = MaterialTheme.typography.titleSmall)
                     Text(state.serverUrl.orEmpty())
+                    // Lets another phone (e.g. an iPhone, without this app) open the web upload page.
+                    FilledTonalButton(
+                        onClick = { showSettings = false; showServerQr = true },
+                        shapes = ButtonDefaults.shapes(),
+                        enabled = state.serverUrl != null,
+                    ) {
+                        Icon(painterResource(R.drawable.ic_qr_code_scanner), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Show QR code for the upload page")
+                    }
                     Spacer(Modifier.size(8.dp))
                     Text("Trash confirmation", style = MaterialTheme.typography.titleSmall)
                     Text(
