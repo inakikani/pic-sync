@@ -58,3 +58,23 @@ class MonthSelectionTest {
         assertEquals(setOf(9L), toggleMonthSelection(setOf(9L), listOf(2L, 3L), pending))
     }
 }
+
+class MonthKeyTest {
+    private val paris = java.time.ZoneId.of("Europe/Paris")
+
+    @Test fun keyRoundTripsToTheSameMonth() {
+        val t = java.time.ZonedDateTime.of(2026, 11, 2, 12, 0, 0, 0, paris).toInstant().toEpochMilli()
+        assertEquals(YearMonth.of(2026, 11), yearMonthOf(monthKey(t, paris)))
+        assertEquals(YearMonth.of(1999, 1), yearMonthOf(1999 * 12))
+        assertEquals(YearMonth.of(1999, 12), yearMonthOf(1999 * 12 + 11))
+    }
+
+    @Test fun groupingByKeyMatchesGroupingByDate() {
+        val taken = listOf(2026 to 11, 2026 to 11, 2026 to 10, 2025 to 12).map { (y, m) ->
+            java.time.ZonedDateTime.of(y, m, 15, 12, 0, 0, 0, paris).toInstant().toEpochMilli()
+        }
+        val byDate = groupByMonth(taken, paris) { it }
+        val byKey = groupByMonthKey(taken) { monthKey(it, paris) }
+        assertEquals(byDate, byKey)
+    }
+}

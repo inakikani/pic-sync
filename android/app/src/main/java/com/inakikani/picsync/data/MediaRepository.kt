@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.util.Size
 import java.io.IOException
+import java.time.ZoneId
 import java.io.InputStream
 
 /** A photo or video on the phone, as seen by MediaStore. */
@@ -21,6 +22,7 @@ data class MediaItem(
     override val isVideo: Boolean,
     val albumId: Long,      // MediaStore bucket (on-device folder)
     val albumName: String,
+    val month: Int,         // monthKey(takenAt) in the phone's time zone, for the gallery's month headers
 ) : Filterable {
     val snapshot get() = MediaSnapshot(size, dateModified)
 
@@ -78,6 +80,7 @@ class MediaRepository(
         val items = mutableListOf<MediaItem>()
         // Album names and MIME types repeat across thousands of rows; keep one copy of each.
         val shared = HashMap<String, String>()
+        val zone = ZoneId.systemDefault()
         fun share(s: String) = shared.getOrPut(s) { s }
         resolver.query(
             MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), projection, selection, args, sort,
@@ -95,17 +98,19 @@ class MediaRepository(
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 val isVideo = c.getInt(typeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                val takenAt = c.getLong(takenCol).takeIf { !c.isNull(takenCol) && it > 0 }
+                    ?: (c.getLong(addedCol) * 1000) // DATE_ADDED is in seconds
                 items += MediaItem(
                     id = id,
                     name = c.getString(nameCol) ?: "item-$id",
                     mimeType = share(c.getString(mimeCol) ?: ""),
                     size = c.getLong(sizeCol),
                     dateModified = c.getLong(modCol),
-                    takenAt = c.getLong(takenCol).takeIf { !c.isNull(takenCol) && it > 0 }
-                        ?: (c.getLong(addedCol) * 1000), // DATE_ADDED is in seconds
+                    takenAt = takenAt,
                     isVideo = isVideo,
                     albumId = if (c.isNull(bucketCol)) 0L else c.getLong(bucketCol),
                     albumName = share(c.getString(bucketNameCol) ?: "Other"),
+                    month = monthKey(takenAt, zone),
                 )
             }
         }

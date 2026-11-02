@@ -96,6 +96,8 @@ The app follows Android 16/17's design language, Material 3 Expressive. It uses 
 
 **Build and install:** open the `android/` folder in Android Studio, connect your phone (USB or wireless debugging) and press Run. Studio downloads Gradle 9.6.1 and the dependencies on first sync.
 
+**For everyday use, install the release build:** in Android Studio open **Build Variants**, set `app` to **release**, then press Run. The default debug build is unoptimised and debuggable, so scrolling can stutter. The release build is optimised by R8 and uses Compose's precompiled baseline profiles. It is signed with your local debug key, so it installs over the debug build and keeps the app's data.
+
 **Using it:**
 1. Start pic-sync on the Mac. In the app, tap **Scan QR code** (or type the address).
 2. Optionally pick an **album** (Camera, Screenshots, WhatsApp Images, …) from the row at the top. Each one shows how many items still need uploading. Cloud-only Google Photos albums aren't visible to other apps, so only on-device folders appear.

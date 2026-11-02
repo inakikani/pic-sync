@@ -6,6 +6,7 @@ import android.content.ComponentCallbacks2
 import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -52,6 +53,41 @@ fun scopeMatcher(album: Long?, filters: MediaFilters): (MediaItem) -> Boolean {
     return { item -> (album == null || item.albumId == album) && match(item) }
 }
 
+/**
+ * The lists derived from the library, computed lazily and kept while their inputs
+ * are the same objects. UiState is copied on every change (selection, progress,
+ * messages); the inputs below only change when the library, the upload records,
+ * the skip list, the album or the filters do.
+ */
+internal class Derived private constructor(
+    private val media: List<MediaItem>,
+    private val records: Map<Long, UploadRecord>,
+    private val excluded: Set<Long>,
+    private val album: Long?,
+    private val filters: MediaFilters,
+) {
+    val albums: List<Album> by lazy {
+        // Skipped files don't count as pending.
+        groupAlbums(media, { it.albumId }, { it.albumName }, { it.id in records || it.id in excluded })
+    }
+    val inScope: List<MediaItem> by lazy { media.filter(scopeMatcher(album, filters)) }
+    val uploaded: List<MediaItem> by lazy { inScope.filter { it.id in records } }
+    val notUploaded: List<MediaItem> by lazy { inScope.filter { it.id !in records && it.id !in excluded } }
+    val uploadedOnPhone: Int by lazy { inScope.count { it.id in records && it.id !in excluded } }
+
+    private fun matches(m: List<MediaItem>, r: Map<Long, UploadRecord>, e: Set<Long>, a: Long?, f: MediaFilters) =
+        media === m && records === r && excluded === e && album == a && filters == f
+
+    companion object {
+        private var last: Derived? = null
+
+        @Synchronized
+        fun of(media: List<MediaItem>, records: Map<Long, UploadRecord>, excluded: Set<Long>, album: Long?, filters: MediaFilters): Derived =
+            last?.takeIf { it.matches(media, records, excluded, album, filters) }
+                ?: Derived(media, records, excluded, album, filters).also { last = it }
+    }
+}
+
 /** The All / Not uploaded / Uploaded chips above the grid. */
 enum class UploadView { ALL, NOT_UPLOADED, UPLOADED }
 
@@ -72,20 +108,22 @@ data class UiState(
     val busy: String? = null,
     val message: String? = null,
 ) {
-    val albums: List<Album> by lazy {
-        // Skipped files don't count as pending.
-        groupAlbums(media, { it.albumId }, { it.albumName }, { it.id in records || it.id in excluded })
-    }
+    // Derived lists over the whole library. Memoized across UiState copies (see Derived):
+    // selecting a photo, upload progress or a message don't change these inputs, and
+    // recomputing them over tens of thousands of items on every tap made the UI stutter.
+    private val derived: Derived get() = Derived.of(media, records, excluded, selectedAlbum, filters)
+
+    val albums: List<Album> get() = derived.albums
     val albumName: String? get() = selectedAlbum?.let { id -> albums.firstOrNull { it.id == id }?.name }
 
     // Everything below is scoped to the selected album (or all photos) and the filters.
-    val inScope: List<MediaItem> by lazy { media.filter(scopeMatcher(selectedAlbum, filters)) }
+    val inScope: List<MediaItem> get() = derived.inScope
     // Verified on the Mac (including skipped ones that had been uploaded before).
-    val uploaded: List<MediaItem> by lazy { inScope.filter { it.id in records } }
+    val uploaded: List<MediaItem> get() = derived.uploaded
     // Skipped (long-pressed) files aren't pending, so they're left out of counts and "Select not uploaded".
-    val notUploaded: List<MediaItem> by lazy { inScope.filter { it.id !in records && it.id !in excluded } }
+    val notUploaded: List<MediaItem> get() = derived.notUploaded
     // Long-pressed files are protected: never uploaded, never trashed.
-    val uploadedOnPhone: Int by lazy { inScope.count { it.id in records && it.id !in excluded } }
+    val uploadedOnPhone: Int get() = derived.uploadedOnPhone
 
     /** " from Camera", " from Camera (filtered)", " (filtered)" or "" for button/dialog texts. */
     val scopeLabel: String
@@ -107,6 +145,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // Thumbnails are ~300-400 KB each, so the cache is bounded by bytes, not by count:
     // 1/8 of the app's heap limit, at most 48 MB. It's emptied when the app is in the background.
+    // At most 4 thumbnail decodes at once, so a fast fling doesn't start dozens of
+    // decodes competing with drawing for the CPU.
+    private val thumbnailDispatcher = Dispatchers.IO.limitedParallelism(4)
+
     private val thumbs = object : LruCache<Long, ImageBitmap>(
         (Runtime.getRuntime().maxMemory() / 8).coerceAtMost(48L shl 20).toInt(),
     ) {
@@ -220,10 +262,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun fullImage(item: MediaItem, maxW: Int, maxH: Int): ImageBitmap? =
         withContext(Dispatchers.IO) { repo.fullImage(item, maxW, maxH)?.asImageBitmap() }
 
+    /** A thumbnail already in memory, to show without waiting a frame (e.g. scrolling back). */
+    fun cachedThumbnail(id: Long): ImageBitmap? = thumbs.get(id)
+
     suspend fun thumbnail(item: MediaItem): ImageBitmap? {
         thumbs.get(item.id)?.let { return it }
-        return withContext(Dispatchers.IO) { repo.thumbnail(item)?.asImageBitmap() }
-            ?.also { thumbs.put(item.id, it) }
+        return withContext(thumbnailDispatcher) {
+            // Started only if the cell is still on screen: a fling queues many requests,
+            // and ones for cells already scrolled away are cancelled before they run.
+            repo.thumbnail(item)?.let { bmp ->
+                // Upload to the GPU here, off the UI thread, rather than on first draw.
+                val hw = bmp.copy(Bitmap.Config.HARDWARE, false)
+                if (hw != null) {
+                    bmp.recycle()
+                    hw.asImageBitmap()
+                } else {
+                    bmp.asImageBitmap()
+                }
+            }
+        }?.also { thumbs.put(item.id, it) }
     }
 
     fun toggle(id: Long) = _state.update {

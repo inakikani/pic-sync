@@ -18,8 +18,17 @@ android {
     }
 
     buildTypes {
+        // For smooth scrolling, run this one (Build Variants → release). The default
+        // debug build is debuggable and unoptimised: Compose runs noticeably slower and
+        // janks in ways a release build doesn't. R8 optimises and shrinks the code, and
+        // the libraries' baseline profiles are installed with it.
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            // Signed with the local debug key so Android Studio can install it over the
+            // debug build without uninstalling (same app, data kept). Not for the Play Store.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

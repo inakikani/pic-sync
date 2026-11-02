@@ -15,22 +15,38 @@ data class MonthGroup<T>(val month: YearMonth, val items: List<T>)
  * Consecutive items of the same month form one group, so a correctly sorted list
  * gives each month exactly once.
  */
-fun <T> groupByMonth(items: List<T>, zone: ZoneId, takenAt: (T) -> Long): List<MonthGroup<T>> {
+fun <T> groupByMonth(items: List<T>, zone: ZoneId, takenAt: (T) -> Long): List<MonthGroup<T>> =
+    groupByMonthKey(items) { monthKey(takenAt(it), zone) }
+
+/**
+ * Like [groupByMonth], with each item's month already computed as a [monthKey]
+ * (e.g. once when the library is read). This is what the gallery uses: converting
+ * every timestamp to a calendar date on the UI thread was too slow for big libraries.
+ */
+fun <T> groupByMonthKey(items: List<T>, monthKey: (T) -> Int): List<MonthGroup<T>> {
     val groups = ArrayList<MonthGroup<T>>()
-    var current: YearMonth? = null
+    var current = Int.MIN_VALUE
     var bucket = ArrayList<T>()
     for (item in items) {
-        val month = YearMonth.from(Instant.ofEpochMilli(takenAt(item)).atZone(zone))
-        if (month != current) {
-            current?.let { groups += MonthGroup(it, bucket) }
-            current = month
+        val key = monthKey(item)
+        if (key != current) {
+            if (current != Int.MIN_VALUE) groups += MonthGroup(yearMonthOf(current), bucket)
+            current = key
             bucket = ArrayList()
         }
         bucket += item
     }
-    current?.let { groups += MonthGroup(it, bucket) }
+    if (current != Int.MIN_VALUE) groups += MonthGroup(yearMonthOf(current), bucket)
     return groups
 }
+
+/** A month as one Int (year × 12 + month − 1), cheap to compare and store per item. */
+fun monthKey(millis: Long, zone: ZoneId): Int {
+    val d = Instant.ofEpochMilli(millis).atZone(zone)
+    return d.year * 12 + d.monthValue - 1
+}
+
+fun yearMonthOf(key: Int): YearMonth = YearMonth.of(Math.floorDiv(key, 12), Math.floorMod(key, 12) + 1)
 
 /** "November 2026", in the phone's language ("novembre 2026", "November 2026", …). */
 fun monthLabel(month: YearMonth, locale: Locale = Locale.getDefault()): String {

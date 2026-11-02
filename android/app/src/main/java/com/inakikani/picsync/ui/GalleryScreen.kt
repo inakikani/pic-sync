@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyRow
@@ -61,11 +62,10 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.derivedStateOf
 import com.inakikani.picsync.data.MonthGroup
-import com.inakikani.picsync.data.groupByMonth
+import com.inakikani.picsync.data.groupByMonthKey
 import com.inakikani.picsync.data.monthLabel
 import com.inakikani.picsync.data.shortMonthLabel
 import java.time.YearMonth
-import java.time.ZoneId
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
@@ -426,12 +426,8 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                 var viewing by remember { mutableStateOf<Long?>(null) } // id shown full screen
                 // Month sections, like Google Photos: a full-width "November 2026" header
                 // above each month's photos (newest first, by date taken).
-                val months = remember(visible) { MonthIndex(groupByMonth(visible, ZoneId.systemDefault()) { it.takenAt }) }
+                val months = remember(visible) { MonthIndex(groupByMonthKey(visible) { it.month }) }
                 val gridState = rememberLazyGridState()
-                // Month of the first visible row, shown in a label while scrolling.
-                val scrollMonth by remember(months) {
-                    derivedStateOf { months.monthAt(gridState.firstVisibleItemIndex) }
-                }
                 Box(Modifier.fillMaxSize()) {
                     LazyVerticalGrid(
                         state = gridState,
@@ -460,6 +456,7 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                                 MediaCell(
                                     item = item,
                                     loadThumbnail = vm::thumbnail,
+                                    cachedThumbnail = vm::cachedThumbnail,
                                     uploaded = item.id in state.records,
                                     failed = item.id in state.failed,
                                     selected = item.id in state.selected,
@@ -476,25 +473,42 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                     viewing?.let { id ->
                         MediaViewer(visible, startId = id, state = state, vm = vm, onClose = { viewing = null })
                     }
-                    if (gridState.isScrollInProgress && gridState.firstVisibleItemIndex > 0) {
-                        scrollMonth?.let { month ->
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.inverseSurface,
-                                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                                shadowElevation = 4.dp,
-                                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
-                            ) {
-                                Text(
-                                    shortMonthLabel(month),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                )
-                            }
-                        }
-                    }
+                    ScrollMonthLabel(gridState, months, Modifier.align(Alignment.TopCenter))
                 }
             }
+        }
+    }
+}
+
+/**
+ * "Nov 2026" at the top while scrolling. Its own composable, reading the scroll
+ * position only through derivedStateOf: reading it in the grid's scope re-ran the
+ * whole grid's setup for every row scrolled.
+ */
+@Composable
+private fun ScrollMonthLabel(gridState: LazyGridState, months: MonthIndex, modifier: Modifier = Modifier) {
+    val month by remember(months) {
+        derivedStateOf {
+            if (gridState.isScrollInProgress && gridState.firstVisibleItemIndex > 0) {
+                months.monthAt(gridState.firstVisibleItemIndex)
+            } else {
+                null
+            }
+        }
+    }
+    month?.let {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.inverseSurface,
+            contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+            shadowElevation = 4.dp,
+            modifier = modifier.padding(top = 8.dp),
+        ) {
+            Text(
+                shortMonthLabel(it),
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            )
         }
     }
 }
@@ -685,6 +699,7 @@ private fun IdleActions(
 private fun MediaCell(
     item: MediaItem,
     loadThumbnail: suspend (MediaItem) -> ImageBitmap?,
+    cachedThumbnail: (Long) -> ImageBitmap?,
     uploaded: Boolean,
     failed: Boolean,
     selected: Boolean,
@@ -694,7 +709,8 @@ private fun MediaCell(
     onLongClick: () -> Unit,
     onOpen: () -> Unit,
 ) {
-    val thumb by produceState<ImageBitmap?>(null, item.id) { value = loadThumbnail(item) }
+    // Cached thumbnails show in the first frame; others load in the background.
+    val thumb by produceState(cachedThumbnail(item.id), item.id) { if (value == null) value = loadThumbnail(item) }
     // Selecting shrinks the photo into a rounded tile with a springy motion, like Google
     // Photos on Android 16/17; the selection tint shows around it.
     val motion = MaterialTheme.motionScheme
