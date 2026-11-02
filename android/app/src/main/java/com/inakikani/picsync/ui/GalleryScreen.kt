@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -325,21 +326,26 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
         }
 
         var showFilters by remember { mutableStateOf(false) }
+        // Scrolls sideways when the chips don't fit (narrow phones, large font sizes).
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
-                selected = !state.onlyNotUploaded,
-                onClick = { vm.setOnlyNotUploaded(false) },
+                selected = state.uploadView == UploadView.ALL,
+                onClick = { vm.setUploadView(UploadView.ALL) },
                 label = { Text("All (${state.inScope.size})") },
             )
             FilterChip(
-                selected = state.onlyNotUploaded,
-                onClick = { vm.setOnlyNotUploaded(true) },
+                selected = state.uploadView == UploadView.NOT_UPLOADED,
+                onClick = { vm.setUploadView(UploadView.NOT_UPLOADED) },
                 label = { Text("Not uploaded (${state.notUploaded.size})") },
             )
-            Spacer(Modifier.weight(1f))
+            FilterChip(
+                selected = state.uploadView == UploadView.UPLOADED,
+                onClick = { vm.setUploadView(UploadView.UPLOADED) },
+                label = { Text("Uploaded (${state.uploaded.size})") },
+            )
             FilterChip(
                 selected = state.filters.isActive,
                 onClick = { showFilters = true },
@@ -365,14 +371,21 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             FiltersSheet(state.filters, onChange = vm::setFilters, onDismiss = { showFilters = false })
         }
 
-        val visible = if (state.onlyNotUploaded) state.notUploaded else state.inScope
+        val visible = when (state.uploadView) {
+            UploadView.ALL -> state.inScope
+            UploadView.NOT_UPLOADED -> state.notUploaded
+            UploadView.UPLOADED -> state.uploaded
+        }
         when {
             !state.mediaLoaded -> Centered { CircularProgressIndicator() }
             visible.isEmpty() -> Centered {
                 Text(
                     when {
                         state.filters.isActive && state.inScope.isEmpty() -> "Nothing matches the filters"
-                        state.onlyNotUploaded -> "Everything ${state.albumName?.let { "in $it " } ?: ""}is uploaded"
+                        state.uploadView == UploadView.NOT_UPLOADED ->
+                            "Everything ${state.albumName?.let { "in $it " } ?: ""}is uploaded"
+                        state.uploadView == UploadView.UPLOADED ->
+                            "Nothing ${state.albumName?.let { "in $it " } ?: ""}is uploaded yet"
                         else -> "No photos or videos found"
                     },
                 )

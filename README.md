@@ -97,7 +97,7 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 **Using it:**
 1. Start pic-sync on the Mac. In the app, tap **Scan QR code** (or type the address).
 2. Optionally pick an **album** (Camera, Screenshots, WhatsApp Images, …) from the row at the top. Each one shows how many items still need uploading. Cloud-only Google Photos albums aren't visible to other apps, so only on-device folders appear.
-3. Optionally tap **Filters** to narrow the view by **type** (photos/videos), **date taken** (last 7/30 days, this year, older than a year, or a custom range) and **minimum size** in MB.
+3. Use the **All / Not uploaded / Uploaded** chips to show everything, only what's left to send, or only what's already verified on the Mac. Optionally tap **Filters** to narrow the view by **type** (photos/videos), **date taken** (last 7/30 days, this year, older than a year, or a custom range) and **minimum size** in MB.
 4. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
    The grid is grouped by month (e.g. **November 2026 · 132 · 20 to upload**), newest first by date taken. While you scroll, a label at the top shows which month you're in. To upload a whole month, tap **Select N** on its header (it picks only what isn't uploaded or skipped yet), then **Upload**. Tap **Deselect** to undo.
    To look at a photo or video full screen, tap the **⤢** button in the corner of its thumbnail. Swipe for the next one, pinch or double-tap to zoom, and tap to show or hide the info bar (date, size, upload status, **Select**). Videos play with the usual controls. Back or **✕** closes it.

@@ -52,6 +52,9 @@ fun scopeMatcher(album: Long?, filters: MediaFilters): (MediaItem) -> Boolean {
     return { item -> (album == null || item.albumId == album) && match(item) }
 }
 
+/** The All / Not uploaded / Uploaded chips above the grid. */
+enum class UploadView { ALL, NOT_UPLOADED, UPLOADED }
+
 data class UiState(
     val serverUrl: String? = null,
     val connecting: Boolean = false,
@@ -62,7 +65,7 @@ data class UiState(
     val failed: Map<Long, String> = emptyMap(),        // this session's failures
     val selected: Set<Long> = emptySet(),
     val excluded: Set<Long> = emptySet(),     // long-pressed to skip: never uploaded or trashed (persisted)
-    val onlyNotUploaded: Boolean = false,
+    val uploadView: UploadView = UploadView.ALL,
     val selectedAlbum: Long? = null, // null = all photos
     val filters: MediaFilters = MediaFilters(),
     val upload: UploadProgress? = null,
@@ -77,6 +80,8 @@ data class UiState(
 
     // Everything below is scoped to the selected album (or all photos) and the filters.
     val inScope: List<MediaItem> by lazy { media.filter(scopeMatcher(selectedAlbum, filters)) }
+    // Verified on the Mac (including skipped ones that had been uploaded before).
+    val uploaded: List<MediaItem> by lazy { inScope.filter { it.id in records } }
     // Skipped (long-pressed) files aren't pending, so they're left out of counts and "Select not uploaded".
     val notUploaded: List<MediaItem> by lazy { inScope.filter { it.id !in records && it.id !in excluded } }
     // Long-pressed files are protected: never uploaded, never trashed.
@@ -249,7 +254,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             selected = toggleMonthSelection(s.selected, items.map { it.id }) { id -> id !in s.records && id !in s.excluded },
         )
     }
-    fun setOnlyNotUploaded(only: Boolean) = _state.update { it.copy(onlyNotUploaded = only) }
+    fun setUploadView(view: UploadView) = _state.update { it.copy(uploadView = view) }
     fun selectAlbum(id: Long?) = _state.update { it.copy(selectedAlbum = id) }
     fun setFilters(filters: MediaFilters) = _state.update { it.copy(filters = filters) }
     fun showMessage(msg: String) = _state.update { it.copy(message = msg) }
