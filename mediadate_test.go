@@ -241,3 +241,60 @@ func TestUploadKeepsOriginalDate(t *testing.T) {
 		t.Errorf("d.txt: future mtime %v was applied", got)
 	}
 }
+
+func TestFixDates(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, data []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	exif := time.Date(2024, 7, 14, 18, 30, 5, 0, time.FixedZone("", 2*3600))
+	jpg := write("a.jpg", jpegWithExif(tiffBlock(binary.BigEndian, "2024:07:14 18:30:05", "+02:00")))
+	movTime := time.Date(2023, 12, 24, 20, 0, 0, 0, time.UTC)
+	mov := write("b.mov", mp4WithTime(movTime, true))
+	png := write("c.png", []byte("\x89PNG no date"))
+	hidden := write(".upload-1.part", jpegWithExif(tiffBlock(binary.BigEndian, "2024:07:14 18:30:05", "")))
+	before := map[string]time.Time{}
+	for _, p := range []string{jpg, mov, png, hidden} {
+		before[p] = modTime(t, p)
+	}
+
+	var out bytes.Buffer
+	if err := fixDates(dir, true, &out); err != nil {
+		t.Fatal(err)
+	}
+	for p, m := range before {
+		if !modTime(t, p).Equal(m) {
+			t.Errorf("dry run changed %s", p)
+		}
+	}
+	if !bytes.Contains(out.Bytes(), []byte("would update 2, already correct 0, no date in file 1")) {
+		t.Errorf("dry run output:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := fixDates(dir, false, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := modTime(t, jpg); !got.Equal(exif) {
+		t.Errorf("a.jpg: %v, want %v", got, exif)
+	}
+	if got := modTime(t, mov); !got.Equal(movTime) {
+		t.Errorf("b.mov: %v, want %v", got, movTime)
+	}
+	if !modTime(t, png).Equal(before[png]) || !modTime(t, hidden).Equal(before[hidden]) {
+		t.Error("files without a date / hidden files were changed")
+	}
+	if !bytes.Contains(out.Bytes(), []byte("updated 2, already correct 0, no date in file 1")) {
+		t.Errorf("output:\n%s", out.String())
+	}
+
+	out.Reset()
+	fixDates(dir, false, &out)
+	if !bytes.Contains(out.Bytes(), []byte("updated 0, already correct 2, no date in file 1")) {
+		t.Errorf("second run output:\n%s", out.String())
+	}
+}

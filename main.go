@@ -57,7 +57,17 @@ func loadConfig(path string) (Config, error) {
 func main() {
 	configPath := flag.String("config", "config.json", "path to JSON config file")
 	mode := flag.String("mode", "auto", `UX to use: "cli" (terminal + QR), "app" (macOS dialogs + browser QR page), or "auto" (app when launched from pic-sync.app, cli otherwise)`)
+	fixDir := flag.String("fix-dates", "", "instead of serving, give files already in this folder the date they were taken (from EXIF/video metadata) and exit")
+	dryRun := flag.Bool("dry-run", false, "with -fix-dates: only show what would change")
 	flag.Parse()
+
+	if *fixDir != "" {
+		if err := fixDates(*fixDir, *dryRun, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	configSet := false
 	flag.Visit(func(f *flag.Flag) { configSet = configSet || f.Name == "config" })
