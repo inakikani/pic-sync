@@ -100,6 +100,7 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 3. Optionally tap **Filters** to narrow the view by **type** (photos/videos), **date taken** (last 7/30 days, this year, older than a year, or a custom range) and **minimum size** in MB.
 4. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
    The grid is grouped by month (e.g. **November 2026 · 132 · 20 to upload**), newest first by date taken. While you scroll, a label at the top shows which month you're in. To upload a whole month, tap **Select N** on its header (it picks only what isn't uploaded or skipped yet), then **Upload**. Tap **Deselect** to undo.
+   To look at a photo or video full screen, tap the **⤢** button in the corner of its thumbnail. Swipe for the next one, pinch or double-tap to zoom, and tap to show or hide the info bar (date, size, upload status, **Select**). Videos play with the usual controls. Back or **✕** closes it.
    **Long-press** a photo to skip it (it dims and shows ⊘): it's never selected, uploaded or moved to trash, and doesn't count as *not uploaded*. Long-press again to undo. The app remembers skipped photos across restarts.
 5. Tap **Move N uploaded to trash**. This applies to what you're viewing (album + filters), e.g. *Videos · Older than 1 year · ≥ 100 MB*, or to everything under *All photos* with no filters. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
 

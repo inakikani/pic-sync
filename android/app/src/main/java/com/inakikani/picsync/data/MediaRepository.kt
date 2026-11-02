@@ -3,6 +3,7 @@ package com.inakikani.picsync.data
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Size
@@ -141,6 +142,23 @@ class MediaRepository(
         }
         val stream = resolver.openInputStream(item.uri) ?: throw IOException("Can't open ${item.name}")
         return Opened(stream, false, why)
+    }
+
+    /**
+     * Decodes a photo for the full-screen viewer, scaled to fit [maxW]×[maxH] times
+     * 1.5 (some headroom for zooming) but never larger than the original. EXIF
+     * rotation is applied by ImageDecoder. Null if it can't be decoded.
+     */
+    fun fullImage(item: MediaItem, maxW: Int, maxH: Int): Bitmap? = try {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, item.uri)) { decoder, info, _ ->
+            val w = info.size.width
+            val h = info.size.height
+            val scale = minOf(1.0, 1.5 * minOf(maxW.toDouble() / w, maxH.toDouble() / h))
+            if (scale < 1.0) decoder.setTargetSize(maxOf(1, (w * scale).toInt()), maxOf(1, (h * scale).toInt()))
+        }
+    } catch (e: Exception) {
+        AppLog.w("viewer: can't decode ${item.name} (id ${item.id})", e)
+        null
     }
 
     /** Re-reads the item's bytes and hashes them. */

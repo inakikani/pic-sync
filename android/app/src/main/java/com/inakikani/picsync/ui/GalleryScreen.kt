@@ -8,6 +8,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -373,6 +374,7 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             }
             else -> {
                 val fraction = vm.uploadFraction.collectAsStateWithLifecycle()
+                var viewing by remember { mutableStateOf<Long?>(null) } // id shown full screen
                 // Month sections, like Google Photos: a full-width "November 2026" header
                 // above each month's photos (newest first, by date taken).
                 val months = remember(visible) { MonthIndex(groupByMonth(visible, ZoneId.systemDefault()) { it.takenAt }) }
@@ -417,9 +419,13 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                                     progress = if (up?.currentId == item.id) ({ fraction.value }) else null,
                                     onClick = { vm.toggle(item.id) },
                                     onLongClick = { vm.toggleExcluded(item.id) },
+                                    onOpen = { viewing = item.id },
                                 )
                             }
                         }
+                    }
+                    viewing?.let { id ->
+                        MediaViewer(visible, startId = id, state = state, vm = vm, onClose = { viewing = null })
                     }
                     if (gridState.isScrollInProgress && gridState.firstVisibleItemIndex > 0) {
                         scrollMonth?.let { month ->
@@ -624,6 +630,7 @@ private fun MediaCell(
     progress: (() -> Float)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onOpen: () -> Unit,
 ) {
     val thumb by produceState<ImageBitmap?>(null, item.id) { value = loadThumbnail(item) }
     val shape = RoundedCornerShape(4.dp)
@@ -666,6 +673,13 @@ private fun MediaCell(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
             )
         }
+        // Open full screen. A separate button, since tap selects and long-press skips.
+        Box(
+            Modifier.align(Alignment.BottomEnd).padding(3.dp).size(30.dp).clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(onClickLabel = "View full screen", onClick = onOpen),
+            contentAlignment = Alignment.Center,
+        ) { Text("⤢", color = Color.White, style = MaterialTheme.typography.titleSmall) }
     }
 }
 

@@ -211,6 +211,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A screen-sized decode of a photo for the full-screen viewer (not cached: ~10 MB each). */
+    suspend fun fullImage(item: MediaItem, maxW: Int, maxH: Int): ImageBitmap? =
+        withContext(Dispatchers.IO) { repo.fullImage(item, maxW, maxH)?.asImageBitmap() }
+
     suspend fun thumbnail(item: MediaItem): ImageBitmap? {
         thumbs.get(item.id)?.let { return it }
         return withContext(Dispatchers.IO) { repo.thumbnail(item)?.asImageBitmap() }
