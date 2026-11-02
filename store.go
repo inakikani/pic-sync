@@ -28,11 +28,12 @@ type savedFile struct {
 // hashes are cached (invalidated by size/mtime changes), so in the common case
 // nothing extra is hashed at all.
 type store struct {
-	dirMu sync.RWMutex
-	dir   string     // upload folder; can change at runtime (menu bar "Change folder…")
-	mu    sync.Mutex // serialises duplicate check + final rename
-	cache map[string]hashEntry
-	act   *activity
+	dirMu    sync.RWMutex
+	dir      string     // upload folder; can change at runtime (menu bar "Change folder…")
+	mu       sync.Mutex // serialises duplicate check + final rename; guards cache*
+	cache    map[string]hashEntry
+	cacheDir string // folder the cache entries belong to
+	act      *activity
 }
 
 type hashEntry struct {
@@ -87,6 +88,7 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.useCacheFor(dir)
 
 	existing, err := s.findDuplicate(dir, size, res.SHA256)
 	if err != nil {
@@ -114,6 +116,14 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 	}
 	res.Name = final
 	return res, nil
+}
+
+// useCacheFor drops the hash cache when uploads move to another folder, so
+// entries for the old folder aren't kept for the rest of the run. Must hold s.mu.
+func (s *store) useCacheFor(dir string) {
+	if dir != s.cacheDir {
+		s.cache, s.cacheDir = map[string]hashEntry{}, dir
+	}
 }
 
 // findDuplicate returns the name of a file in dir with the given size and

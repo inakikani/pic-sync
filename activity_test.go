@@ -178,3 +178,26 @@ func TestTrayIcon(t *testing.T) {
 		t.Fatalf("opaque=%d other=%d", opaque, other)
 	}
 }
+
+func TestHashCacheDroppedOnFolderChange(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	st := newStore(a)
+	if _, err := st.save("one.jpg", strings.NewReader("first")); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.cache) != 1 {
+		t.Fatalf("cache has %d entries, want 1", len(st.cache))
+	}
+	st.SetDir(b)
+	if _, err := st.save("two.jpg", strings.NewReader("second")); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.cache) != 1 {
+		t.Fatalf("cache has %d entries after folder change, want 1", len(st.cache))
+	}
+	for p := range st.cache {
+		if filepath.Dir(p) != b {
+			t.Errorf("cache entry %s is not in the new folder %s", p, b)
+		}
+	}
+}

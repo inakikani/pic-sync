@@ -48,6 +48,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inakikani.picsync.data.Album
 import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
@@ -138,6 +140,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         bottomBar = {
             ActionBar(
                 state = state,
+                uploadFraction = vm.uploadFraction.collectAsStateWithLifecycle(),
                 onSelectNotUploaded = vm::selectNotUploaded,
                 onClear = vm::clearSelection,
                 onUpload = { networkGate { vm.uploadSelected() } },
@@ -297,24 +300,28 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                     },
                 )
             }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 110.dp),
-                contentPadding = PaddingValues(2.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(visible, key = { it.id }) { item ->
-                    val up = state.upload
-                    MediaCell(
-                        item = item,
-                        loadThumbnail = vm::thumbnail,
-                        uploaded = item.id in state.records,
-                        failed = item.id in state.failed,
-                        selected = item.id in state.selected,
-                        excluded = item.id in state.excluded,
-                        progress = up?.takeIf { it.currentId == item.id }?.fraction,
-                        onClick = { vm.toggle(item.id) },
-                        onLongClick = { vm.toggleExcluded(item.id) },
-                    )
+            else -> {
+                val fraction = vm.uploadFraction.collectAsStateWithLifecycle()
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 110.dp),
+                    contentPadding = PaddingValues(2.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(visible, key = { it.id }) { item ->
+                        val up = state.upload
+                        MediaCell(
+                            item = item,
+                            loadThumbnail = vm::thumbnail,
+                            uploaded = item.id in state.records,
+                            failed = item.id in state.failed,
+                            selected = item.id in state.selected,
+                            excluded = item.id in state.excluded,
+                            // A lambda, so only this cell re-renders as the percentage changes.
+                            progress = if (up?.currentId == item.id) ({ fraction.value }) else null,
+                            onClick = { vm.toggle(item.id) },
+                            onLongClick = { vm.toggleExcluded(item.id) },
+                        )
+                    }
                 }
             }
         }
@@ -367,6 +374,7 @@ private fun AlbumChip(name: String, count: Int, pending: Int, selected: Boolean,
 @Composable
 private fun ActionBar(
     state: UiState,
+    uploadFraction: State<Float>,
     onSelectNotUploaded: () -> Unit,
     onClear: () -> Unit,
     onUpload: () -> Unit,
@@ -382,7 +390,7 @@ private fun ActionBar(
             if (up != null) {
                 Text("Uploading ${up.index + 1} of ${up.total}")
                 LinearProgressIndicator(
-                    progress = { (up.index + up.fraction) / up.total },
+                    progress = { (up.index + uploadFraction.value) / up.total },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
@@ -437,7 +445,7 @@ private fun MediaCell(
     failed: Boolean,
     selected: Boolean,
     excluded: Boolean,
-    progress: Float?,
+    progress: (() -> Float)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -465,7 +473,7 @@ private fun MediaCell(
         }
         when {
             excluded -> Badge("⊘", MaterialTheme.colorScheme.error)
-            progress != null -> Badge("${(progress * 100).toInt()}%", MaterialTheme.colorScheme.primary)
+            progress != null -> Badge("${(progress() * 100).toInt()}%", MaterialTheme.colorScheme.primary)
             uploaded -> Badge("✓", Color(0xFF16A34A))
             failed -> Badge("!", MaterialTheme.colorScheme.error)
         }
@@ -478,7 +486,7 @@ private fun MediaCell(
         }
         if (progress != null) {
             LinearProgressIndicator(
-                progress = { progress },
+                progress = progress,
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
             )
         }

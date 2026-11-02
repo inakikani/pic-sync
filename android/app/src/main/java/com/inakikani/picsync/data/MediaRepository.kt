@@ -10,7 +10,6 @@ import android.util.Size
 /** A photo or video on the phone, as seen by MediaStore. */
 data class MediaItem(
     val id: Long,
-    val uri: Uri,
     val name: String,
     val mimeType: String,
     override val size: Long,
@@ -21,6 +20,17 @@ data class MediaItem(
     val albumName: String,
 ) : Filterable {
     val snapshot get() = MediaSnapshot(size, dateModified)
+
+    /**
+     * Content URI, built on demand rather than stored: a Uri costs a few hundred bytes and
+     * is only needed to upload, thumbnail or trash an item. Trash requests need
+     * Images/Video collection URIs, not Files URIs.
+     */
+    val uri: Uri
+        get() = ContentUris.withAppendedId(
+            if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            id,
+        )
 }
 
 /** Reads photos/videos from MediaStore. Blocking: call from a background thread. */
@@ -47,6 +57,9 @@ class MediaRepository(private val resolver: ContentResolver) {
         )
         val sort = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
         val items = mutableListOf<MediaItem>()
+        // Album names and MIME types repeat across thousands of rows; keep one copy of each.
+        val shared = HashMap<String, String>()
+        fun share(s: String) = shared.getOrPut(s) { s }
         resolver.query(
             MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), projection, selection, args, sort,
         )?.use { c ->
@@ -63,24 +76,17 @@ class MediaRepository(private val resolver: ContentResolver) {
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 val isVideo = c.getInt(typeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
-                // Trash requests need Images/Video collection URIs, not Files URIs.
-                val collection = if (isVideo) {
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                } else {
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                }
                 items += MediaItem(
                     id = id,
-                    uri = ContentUris.withAppendedId(collection, id),
                     name = c.getString(nameCol) ?: "item-$id",
-                    mimeType = c.getString(mimeCol) ?: "",
+                    mimeType = share(c.getString(mimeCol) ?: ""),
                     size = c.getLong(sizeCol),
                     dateModified = c.getLong(modCol),
                     takenAt = c.getLong(takenCol).takeIf { !c.isNull(takenCol) && it > 0 }
                         ?: (c.getLong(addedCol) * 1000), // DATE_ADDED is in seconds
                     isVideo = isVideo,
                     albumId = if (c.isNull(bucketCol)) 0L else c.getLong(bucketCol),
-                    albumName = c.getString(bucketNameCol) ?: "Other",
+                    albumName = share(c.getString(bucketNameCol) ?: "Other"),
                 )
             }
         }

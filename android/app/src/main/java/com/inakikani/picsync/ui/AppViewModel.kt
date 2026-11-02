@@ -1,7 +1,9 @@
 package com.inakikani.picsync.ui
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.IntentSender
+import android.content.res.Configuration
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.LruCache
@@ -34,7 +36,8 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.ZonedDateTime
 
-data class UploadProgress(val index: Int, val total: Int, val currentId: Long, val fraction: Float)
+/** Which file is uploading. Its byte progress is in [AppViewModel.uploadFraction], not here. */
+data class UploadProgress(val index: Int, val total: Int, val currentId: Long)
 
 /** Album + filters predicate; used for the gallery and again, freshly, for trashing. */
 fun scopeMatcher(album: Long?, filters: MediaFilters): (MediaItem) -> Boolean {
@@ -82,10 +85,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = MediaRepository(resolver)
     private val store = UploadStore(app)
     private val settings = Settings(app)
-    private val thumbs = LruCache<Long, ImageBitmap>(400)
+
+    // Thumbnails are ~300-400 KB each, so the cache is bounded by bytes, not by count:
+    // 1/8 of the app's heap limit, at most 48 MB. It's emptied when the app is in the background.
+    private val thumbs = object : LruCache<Long, ImageBitmap>(
+        (Runtime.getRuntime().maxMemory() / 8).coerceAtMost(48L shl 20).toInt(),
+    ) {
+        override fun sizeOf(key: Long, value: ImageBitmap) = value.width * value.height * 4
+    }
+    private val memoryCallbacks = object : ComponentCallbacks2 {
+        override fun onTrimMemory(level: Int) {
+            if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) thumbs.evictAll()
+        }
+        override fun onConfigurationChanged(newConfig: Configuration) = Unit
+        @Deprecated("Deprecated in Java")
+        override fun onLowMemory() = thumbs.evictAll()
+    }
 
     private val _state = MutableStateFlow(UiState(serverUrl = settings.serverUrl, excluded = settings.excluded))
     val state = _state.asStateFlow()
+
+    // The current file's upload progress (0..1). Kept out of UiState so the ~100 updates per
+    // file don't rebuild the whole state (and its derived lists over the full library).
+    private val _uploadFraction = MutableStateFlow(0f)
+    val uploadFraction = _uploadFraction.asStateFlow()
+
+    init {
+        app.registerComponentCallbacks(memoryCallbacks)
+    }
 
     private var uploadJob: Job? = null
     @Volatile private var lastReported = -1f
@@ -195,9 +222,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 for ((i, item) in items.withIndex()) {
                     lastReported = -1f
-                    _state.update { it.copy(upload = UploadProgress(i, items.size, item.id, 0f)) }
+                    _uploadFraction.value = 0f
+                    _state.update { it.copy(upload = UploadProgress(i, items.size, item.id)) }
                     try {
-                        val result = uploadOne(client, item) { sent -> reportProgress(i, items.size, item, sent) }
+                        val result = uploadOne(client, item) { sent -> reportProgress(item, sent) }
                         if (result.verified) {
                             val rec = UploadRecord(
                                 mediaId = item.id,
@@ -261,11 +289,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-    private fun reportProgress(index: Int, total: Int, item: MediaItem, sent: Long) {
+    private fun reportProgress(item: MediaItem, sent: Long) {
         val f = if (item.size > 0) (sent.toFloat() / item.size).coerceIn(0f, 1f) else 0f
         if (f - lastReported < 0.01f && f < 1f) return // throttle UI updates to ~1% steps
         lastReported = f
-        _state.update { it.copy(upload = UploadProgress(index, total, item.id, f)) }
+        _uploadFraction.value = f
     }
 
     // ---- clean up ----
@@ -335,6 +363,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        getApplication<Application>().unregisterComponentCallbacks(memoryCallbacks)
+        thumbs.evictAll()
         store.close()
     }
 }
