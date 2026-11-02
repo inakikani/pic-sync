@@ -115,7 +115,7 @@ On the phone:
 
 **Android app shows only a blank screen**
 - In Logcat, filter on `tag:pic-sync`. A normal start logs `startup: activity created`, `building the first screen`, `view model created` and `first frame drawn`. The last line shows how far it got.
-- If the app is stuck, a `watchdog: main thread blocked …` entry follows within a few seconds. It shows the code the app is stuck in.
+- If the app is stuck, a `watchdog: main thread blocked …` entry follows within a few seconds. It shows the code the app is stuck in. The watchdog only runs in debuggable builds, i.e. those installed from Android Studio.
 - Also check for a `FATAL EXCEPTION` (filter `package:com.inakikani.picsync`).
 
 **Android app crashes**

@@ -9,6 +9,7 @@ import android.os.SystemClock
  * A frozen or blank screen then shows up in the log with the exact code that
  * blocks, without needing a debugger. Logs once per stall, then every 10 s while
  * it lasts. (A debugger paused on a breakpoint also triggers it; that's harmless.)
+ * Started only in debuggable builds (see PicSyncApp).
  */
 object MainThreadWatchdog {
     private const val STALL_MS = 2_000L
