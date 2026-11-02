@@ -50,7 +50,13 @@ class MediaRepository(
 ) {
 
     /** All images and videos visible to the app, newest taken first. Trashed and pending items are excluded. */
-    fun query(): List<MediaItem> {
+    fun query(): List<MediaItem> = queryWhere(null, emptyArray())
+
+    /** Library photos/videos whose file is exactly [bytes] long (to match shared files). */
+    fun withSize(bytes: Long): List<MediaItem> =
+        queryWhere("${MediaStore.Files.FileColumns.SIZE} = ?", arrayOf(bytes.toString()))
+
+    private fun queryWhere(extra: String?, extraArgs: Array<String>): List<MediaItem> {
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -63,11 +69,11 @@ class MediaRepository(
             MediaStore.Files.FileColumns.BUCKET_ID,
             MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
         )
-        val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
+        val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)" + (extra?.let { " AND $it" } ?: "")
         val args = arrayOf(
             MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
             MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
-        )
+        ) + extraArgs
         val sort = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
         val items = mutableListOf<MediaItem>()
         // Album names and MIME types repeat across thousands of rows; keep one copy of each.

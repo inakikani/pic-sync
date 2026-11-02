@@ -104,6 +104,12 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
    **Long-press** a photo to skip it (it dims and shows ⊘): it's never selected, uploaded or moved to trash, and doesn't count as *not uploaded*. Long-press again to undo. The app remembers skipped photos across restarts.
 5. Tap **Move N uploaded to trash**. This applies to what you're viewing (album + filters), e.g. *Videos · Older than 1 year · ≥ 100 MB*, or to everything under *All photos* with no filters. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
 
+**Sharing from Google Photos (or any app):** select photos or videos, tap **Share → pic-sync**, and they're sent to the Mac you last connected to. If there isn't one yet, the QR scan comes first.
+- **Keep the screen open** until it's done: Android only lets pic-sync read shared files while that screen is open.
+- **Cloud-only photos:** Google Photos downloads them first, so photos that aren't stored on the phone can be sent this way too.
+- **Moving to trash later:** each verified file is matched to the same photo in the phone's library (same size, then identical SHA-256). A match counts as uploaded in the pic-sync gallery and can be moved to trash from there later. The screen shows for each file whether it was found on the phone.
+- **No match:** a cloud-only photo, or a version Google Photos changed (edited, compressed, location removed), isn't linked to anything on the phone, so it's never trashed.
+
 **Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
 
 **Permissions:** photos and videos (limited access works too) including their location, so uploads keep GPS data, and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.

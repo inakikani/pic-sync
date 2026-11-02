@@ -60,6 +60,7 @@ The app logs:
 - **The photo library:** what was read.
 - **Each upload:** size, time, speed, the name on the Mac, whether it was verified, and whether GPS location was kept or why not. On a verification failure it logs both hashes.
 - **Moving to trash:** what was moved, skipped or protected.
+- **Sharing to pic-sync:** what was received and from which app, and each file's result. That includes whether it was matched to a photo on the phone, e.g. `phone library: matched id 1000123 (IMG_1234.jpg)` or `no match: no photo of that size on the phone (cloud-only, or a different version)`.
 - **Other:** permission answers, thumbnail failures (the first few), QR scanner errors and crashes.
 
 Errors also have a stack trace in the file.
@@ -123,6 +124,13 @@ On the phone:
 - In Logcat, filter on `tag:pic-sync`. A normal start logs `startup: activity created`, `building the first screen`, `view model created` and `first frame drawn`. The last line shows how far it got.
 - If the app is stuck, a `watchdog: main thread blocked …` entry follows within a few seconds. It shows the code the app is stuck in. The watchdog only runs in debuggable builds, i.e. those installed from Android Studio.
 - Also check for a `FATAL EXCEPTION` (filter `package:com.inakikani.picsync`).
+
+**A photo shared from Google Photos isn't offered for trash**
+- Look for the `share:` line in the app log:
+  - **`no photo of that size`:** the photo is only in the cloud, or Google Photos sent a different version than the one on the phone (edited, or compressed by "Storage saver").
+  - **`same size, but different content`:** usually location. Google Photos sent the file with location and pic-sync read the phone's copy without it, or the other way round. Allow **Settings → Photo location** in pic-sync, then share it again (the Mac reports it as a duplicate, and the match is retried).
+  - **`no photo access`:** allow pic-sync's photo access.
+- Uploading the photo from the pic-sync gallery always works for trashing.
 
 **Android app crashes**
 - The crash and its stack trace are in the app log. After reopening the app, use **Share diagnostics**, or check Logcat in Android Studio.
