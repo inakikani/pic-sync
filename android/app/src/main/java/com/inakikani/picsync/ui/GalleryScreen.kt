@@ -95,6 +95,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -707,7 +708,9 @@ private fun MediaCell(
             .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        Box(Modifier.fillMaxSize().padding(inset).clip(RoundedCornerShape(corner))) {
+        // The expressive spring overshoots: animating back to 0 briefly dips below it,
+        // and negative padding throws (that crashed the app when unselecting). Clamp.
+        Box(Modifier.fillMaxSize().padding(inset.coerceAtLeast(0.dp)).clip(RoundedCornerShape(corner.coerceAtLeast(0.dp)))) {
             thumb?.let {
                 Image(
                     it,
