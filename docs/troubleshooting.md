@@ -102,7 +102,7 @@ On the phone:
 - Fix files that are already on the Mac: `pic-sync -fix-dates <folder> -dry-run`, then run it again without `-dry-run`.
 
 **GPS location is missing**
-- **Android app:** look for `WITHOUT location: …` in the app log. The usual cause is that *media location* wasn't granted (Settings → Apps → pic-sync → Permissions), or that only limited ("selected photos") access was given.
+- **Android app:** look for `WITHOUT location: …` in the app log. The usual cause is that *media location* isn't allowed (`location=no` in the `app start` line). This happens when photo access was given by an older version of the app. Allow it in the app under **Settings → Photo location → Allow**. Limited ("selected photos") access can also prevent it.
 - **Browsers:** they may remove location before sending, and the Mac can't add it back. Use the Android app.
 
 **iPhone: tapping *Add* in the photo picker does nothing, or photos arrive as JPEG**
@@ -112,6 +112,10 @@ On the phone:
 - **macOS refuses to open it:** right-click → **Open** once, or run `xattr -cr pic-sync.app`.
 - **No icon, but a "pic-sync is running" window:** the app was built without the menu bar (cross-compiled, not with `make app` on a Mac). The startup line shows `ui="window (built without the menu bar)"`.
 - **Nothing visible at all:** check `~/Library/Logs/pic-sync.log` for the startup line and errors, or run `pic-sync.app/Contents/MacOS/pic-sync` in Terminal to see the log live.
+
+**Android app shows only a blank screen**
+- Press **Back**. If the gallery appears, a permission screen without a dialog was stuck on top: Android 17 did that when media location was requested on its own at launch. Since that fix, the app never asks for it automatically when photo access already exists.
+- Otherwise look in Logcat (`package:com.inakikani.picsync`) for a `FATAL EXCEPTION`, or for the last `pic-sync` line before it stopped.
 
 **Android app crashes**
 - The crash and its stack trace are in the app log. After reopening the app, use **Share diagnostics**, or check Logcat in Android Studio.

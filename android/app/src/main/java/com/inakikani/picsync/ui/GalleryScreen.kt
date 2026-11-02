@@ -92,16 +92,16 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         AppLog.i("permissions: asked ${result.keys.map { it.substringAfterLast('.') }} -> $result; photo access now $access")
         vm.refreshMedia()
     }
-    // Installs from before location support already have media access: ask only for location,
-    // so a limited-access user isn't shown the photo selection again.
-    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        AppLog.i("permissions: media location ${if (granted) "granted" else "denied (uploads will have no GPS location)"}")
+    fun askMediaPermissions(why: String) {
+        AppLog.i("permissions: asking for photos/videos + media location ($why)")
+        mediaLauncher.launch(mediaPermissions())
     }
+    // Only ask automatically when there's no photo access at all. Media location has no
+    // dialog of its own: requested alone at launch (installs that already had photo access),
+    // Android 17 left an invisible permission screen on top of the app, i.e. a blank screen.
+    // It's offered in Settings instead.
     LaunchedEffect(Unit) {
-        when {
-            access == MediaAccess.NONE -> mediaLauncher.launch(mediaPermissions())
-            !hasMediaLocation(ctx) -> locationLauncher.launch(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
-        }
+        if (access == MediaAccess.NONE) askMediaPermissions("no photo access yet")
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         access = mediaAccess(ctx)
@@ -170,11 +170,11 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (access == MediaAccess.NONE) {
                 NoAccess(
-                    onGrant = { mediaLauncher.launch(mediaPermissions()) },
+                    onGrant = { askMediaPermissions("user tapped Allow") },
                     onSettings = { openAppSettings(ctx) },
                 )
             } else {
-                MediaGrid(vm, state, access, onChangeAccess = { mediaLauncher.launch(mediaPermissions()) })
+                MediaGrid(vm, state, access, onChangeAccess = { askMediaPermissions("user changed access") })
             }
         }
     }
@@ -237,6 +237,23 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
                         },
                     )
                     TextButton(onClick = { openManageMediaSettings(ctx) }) { Text("Open Media management") }
+                    Spacer(Modifier.size(8.dp))
+                    Text("Photo location (GPS)", style = MaterialTheme.typography.titleSmall)
+                    if (hasMediaLocation(ctx)) {
+                        Text("Allowed: uploads keep their location.")
+                    } else {
+                        Text(
+                            "Not allowed: Android removes the location from photos before upload. " +
+                                "If the screen stays empty after tapping Allow, press Back and allow " +
+                                "it in the app settings instead.",
+                        )
+                        Row {
+                            TextButton(onClick = { showSettings = false; askMediaPermissions("Settings: allow location") }) {
+                                Text("Allow")
+                            }
+                            TextButton(onClick = { openAppSettings(ctx) }) { Text("App settings") }
+                        }
+                    }
                     Spacer(Modifier.size(8.dp))
                     Text("Troubleshooting", style = MaterialTheme.typography.titleSmall)
                     Text(
