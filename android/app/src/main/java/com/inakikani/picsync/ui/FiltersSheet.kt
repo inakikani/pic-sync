@@ -25,6 +25,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ToggleButton
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -49,16 +55,23 @@ fun FiltersSheet(filters: MediaFilters, onChange: (MediaFilters) -> Unit, onDism
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Filters", style = MaterialTheme.typography.titleLarge)
+            Text("Filters", style = MaterialTheme.typography.headlineSmallEmphasized)
 
             Section("Type") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MediaTypeFilter.entries.forEach { t ->
-                        FilterChip(
-                            selected = filters.type == t,
-                            onClick = { onChange(filters.copy(type = t)) },
-                            label = { Text(t.label) },
-                        )
+                // Single choice: a connected button group (Material 3 Expressive).
+                Row(horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                    val types = MediaTypeFilter.entries
+                    types.forEachIndexed { i, t ->
+                        ToggleButton(
+                            checked = filters.type == t,
+                            onCheckedChange = { onChange(filters.copy(type = t)) },
+                            modifier = Modifier.weight(1f).semantics { role = Role.RadioButton },
+                            shapes = when (i) {
+                                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                types.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                            },
+                        ) { Text(t.label, maxLines = 1) }
                     }
                 }
             }
@@ -110,8 +123,9 @@ fun FiltersSheet(filters: MediaFilters, onChange: (MediaFilters) -> Unit, onDism
                         onChange(MediaFilters())
                     },
                     enabled = filters.isActive,
+                    shapes = ButtonDefaults.shapes(),
                 ) { Text("Reset") }
-                Button(onClick = onDismiss) { Text("Done") }
+                Button(onClick = onDismiss, shapes = ButtonDefaults.shapes()) { Text("Done") }
             }
         }
     }

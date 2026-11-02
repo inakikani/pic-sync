@@ -90,6 +90,8 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 
 ## Android companion app
 
+The app follows Android 16/17's design language, Material 3 Expressive. It uses your wallpaper's colours, springy motion, connected button groups, wavy progress bars and shape-morphing buttons.
+
 `android/` contains an optional Android app (Android 13+) that uploads photos to this server and can then **move the uploaded ones to the phone's trash**. The browser page can't delete anything on the phone; the app can.
 
 **Build and install:** open the `android/` folder in Android Studio, connect your phone (USB or wireless debugging) and press Run. Studio downloads Gradle 9.6.1 and the dependencies on first sync.
@@ -97,10 +99,10 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 **Using it:**
 1. Start pic-sync on the Mac. In the app, tap **Scan QR code** (or type the address).
 2. Optionally pick an **album** (Camera, Screenshots, WhatsApp Images, …) from the row at the top. Each one shows how many items still need uploading. Cloud-only Google Photos albums aren't visible to other apps, so only on-device folders appear.
-3. Use the **All / Not uploaded / Uploaded** chips to show everything, only what's left to send, or only what's already verified on the Mac. Optionally tap **Filters** to narrow the view by **type** (photos/videos), **date taken** (last 7/30 days, this year, older than a year, or a custom range) and **minimum size** in MB.
+3. Use the **All / To upload / Uploaded** buttons to show everything, only what's left to send, or only what's already verified on the Mac. Optionally tap the **filters** button (sliders icon) to narrow the view by **type** (photos/videos), **date taken** (last 7/30 days, this year, older than a year, or a custom range) and **minimum size** in MB.
 4. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
    The grid is grouped by month (e.g. **November 2026 · 132 · 20 to upload**), newest first by date taken. While you scroll, a label at the top shows which month you're in. To upload a whole month, tap **Select N** on its header (it picks only what isn't uploaded or skipped yet), then **Upload**. Tap **Deselect** to undo.
-   To look at a photo or video full screen, tap the **⤢** button in the corner of its thumbnail. Swipe for the next one, pinch or double-tap to zoom, and tap to show or hide the info bar (date, size, upload status, **Select**). Videos play with the usual controls. Back or **✕** closes it.
+   To look at a photo or video full screen, tap the full-screen button in the corner of its thumbnail. Swipe for the next one, pinch or double-tap to zoom, and tap to show or hide the info bar (date, size, upload status, **Select**). Videos play with the usual controls. Back or the close button closes it.
    **Long-press** a photo to skip it (it dims and shows ⊘): it's never selected, uploaded or moved to trash, and doesn't count as *not uploaded*. Long-press again to undo. The app remembers skipped photos across restarts.
 5. Tap **Move N uploaded to trash**. This applies to what you're viewing (album + filters), e.g. *Videos · Older than 1 year · ≥ 100 MB*, or to everything under *All photos* with no filters. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
 

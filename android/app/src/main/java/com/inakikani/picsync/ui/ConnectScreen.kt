@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +23,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.Surface
+import androidx.compose.material3.toShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
+import com.inakikani.picsync.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
@@ -34,6 +50,7 @@ import com.inakikani.picsync.data.AppLog
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ConnectScreen(vm: AppViewModel, state: UiState) {
     val ctx = LocalContext.current
@@ -50,19 +67,41 @@ fun ConnectScreen(vm: AppViewModel, state: UiState) {
 
     Scaffold { padding ->
         Column(
-            Modifier.padding(padding).padding(24.dp).fillMaxSize(),
+            Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Connect to your Mac", style = MaterialTheme.typography.headlineSmall)
-            Text("Start pic-sync on your Mac, then scan the QR code it shows. Both devices must be on the same Wi-Fi.")
+            // Expressive hero: the QR symbol in one of Material's "cookie" shapes.
+            Box(
+                Modifier.padding(top = 24.dp).size(112.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, MaterialShapes.Cookie9Sided.toShape()),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_qr_code_scanner),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(48.dp),
+                )
+            }
+            Text("Connect to your Mac", style = MaterialTheme.typography.displaySmallEmphasized)
+            Text(
+                "Start pic-sync on your Mac, then scan the QR code it shows. Both devices must be on the same Wi-Fi.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             Button(
                 onClick = { scanQr(ctx, onResult = ::connect, onError = vm::setConnectError) },
+                shapes = ButtonDefaults.shapes(),
                 enabled = !state.connecting,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Scan QR code") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) {
+                Icon(painterResource(R.drawable.ic_qr_code_scanner), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text("Scan QR code", style = MaterialTheme.typography.titleMedium)
+            }
 
-            Text("or enter the address", style = MaterialTheme.typography.labelMedium)
+            Text("or enter the address", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(
                 value = manual,
                 onValueChange = { manual = it },
@@ -74,14 +113,21 @@ fun ConnectScreen(vm: AppViewModel, state: UiState) {
             )
             OutlinedButton(
                 onClick = { connect(manual) },
+                shapes = ButtonDefaults.shapes(),
                 enabled = manual.isNotBlank() && !state.connecting,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) { Text("Connect") }
 
-            if (state.connecting) CircularProgressIndicator()
+            if (state.connecting) LoadingIndicator(Modifier.align(Alignment.CenterHorizontally))
             state.connectError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { shareDiagnosticsAsync(ctx, scope, state) }) { Text("Share diagnostics") }
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.large) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(it, color = MaterialTheme.colorScheme.onErrorContainer)
+                        TextButton(onClick = { shareDiagnosticsAsync(ctx, scope, state) }, shapes = ButtonDefaults.shapes()) {
+                            Text("Share diagnostics")
+                        }
+                    }
+                }
             }
             if (networkDenied) {
                 Text(

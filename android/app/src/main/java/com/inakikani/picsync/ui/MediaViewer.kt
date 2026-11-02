@@ -20,11 +20,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +32,17 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.ui.res.painterResource
+import com.inakikani.picsync.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -92,6 +101,7 @@ fun MediaViewer(items: List<MediaItem>, startId: Long, state: UiState, vm: AppVi
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PhotoPage(item: MediaItem, vm: AppViewModel, onTap: () -> Unit) {
     // The cached thumbnail shows at once; the sharp version replaces it when decoded.
@@ -115,7 +125,7 @@ private fun PhotoPage(item: MediaItem, vm: AppViewModel, onTap: () -> Unit) {
 
         val img = full ?: thumb
         if (img == null) {
-            CircularProgressIndicator(color = Color.White)
+            LoadingIndicator(color = Color.White)
         } else {
             Image(
                 img,
@@ -156,7 +166,9 @@ private fun VideoPage(item: MediaItem, active: Boolean, vm: AppViewModel) {
         val thumb by produceState<ImageBitmap?>(null, item.id) { value = vm.thumbnail(item) }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             thumb?.let { Image(it, contentDescription = item.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
-            Text("▶", color = Color.White, style = MaterialTheme.typography.displayMedium)
+            Box(Modifier.size(72.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape), contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.ic_play_arrow), contentDescription = "Video", tint = Color.White, modifier = Modifier.size(44.dp))
+            }
         }
         return
     }
@@ -202,14 +214,16 @@ private fun InfoBar(item: MediaItem, state: UiState, onToggleSelect: () -> Unit,
             verticalAlignment = Alignment.Top,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(item.name, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                Text(item.name, color = Color.White, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1)
                 Text(
                     "${takenLabel(item.takenAt)} · ${"%.1f".format(Locale.getDefault(), item.size / 1e6)} MB",
                     color = Color.White.copy(alpha = 0.8f),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            TextButton(onClick = onClose) { Text("✕", color = Color.White, style = MaterialTheme.typography.titleLarge) }
+            IconButton(onClick = onClose, shapes = IconButtonDefaults.shapes()) {
+                Icon(painterResource(R.drawable.ic_close), contentDescription = "Close", tint = Color.White)
+            }
         }
         Box(Modifier.weight(1f))
         Row(
@@ -230,8 +244,14 @@ private fun InfoBar(item: MediaItem, state: UiState, onToggleSelect: () -> Unit,
             Text(status, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             val canSelect = id !in state.excluded && state.upload == null
             if (canSelect) {
-                FilledTonalButton(onClick = onToggleSelect) {
-                    Text(if (id in state.selected) "✓ Selected" else "Select")
+                FilledTonalButton(onClick = onToggleSelect, shapes = ButtonDefaults.shapes()) {
+                    if (id in state.selected) {
+                        Icon(painterResource(R.drawable.ic_check), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                        Text("Selected")
+                    } else {
+                        Text("Select")
+                    }
                 }
             }
         }

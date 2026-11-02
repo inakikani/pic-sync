@@ -66,7 +66,7 @@ The app logs:
 Errors also have a stack trace in the file.
 
 On the phone:
-- A photo that failed shows **!**. Tap it to see why, or tap **N failed to upload · see why** above the buttons for the full list.
+- A photo that failed shows a red **!** badge. Tap it to see why, or tap **N failed to upload · see why** above the buttons for the full list.
 - **Share diagnostics** sends the environment line, server address, library counts, this session's failures and the recent log as plain text. It includes file names and the server address, but no photos.
 
 ## Common problems

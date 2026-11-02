@@ -13,21 +13,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -37,7 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inakikani.picsync.MainActivity
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ShareScreen(vm: ShareViewModel, url: String, onDone: () -> Unit) {
     val ctx = LocalContext.current
@@ -61,42 +64,43 @@ fun ShareScreen(vm: ShareViewModel, url: String, onDone: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Send to Mac")
-                        Text(url, style = MaterialTheme.typography.labelSmall)
-                    }
-                },
+            MediumFlexibleTopAppBar(
+                title = { Text("Send to Mac") },
+                subtitle = { Text(url) },
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            ) {
                 Column(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     val total = state.rows.size
                     when {
                         state.running -> {
-                            Text("Sending ${state.current + 1} of $total · keep this screen open")
-                            LinearProgressIndicator(
+                            Text("Sending ${state.current + 1} of $total", style = MaterialTheme.typography.titleSmallEmphasized)
+                            Text("Keep this screen open until it's done", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            LinearWavyProgressIndicator(
                                 progress = { if (total == 0) 0f else (state.current.coerceAtLeast(0) + fraction) / total },
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            OutlinedButton(onClick = vm::cancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                            OutlinedButton(onClick = vm::cancel, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
                         }
                         state.finished -> {
-                            state.summary?.let { Text(it) }
+                            state.summary?.let { Text(it, style = MaterialTheme.typography.titleSmallEmphasized) }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(
+                                    shapes = ButtonDefaults.shapes(),
                                     onClick = {
                                         ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                                         onDone()
                                     },
                                     modifier = Modifier.weight(1f),
                                 ) { Text("Open pic-sync") }
-                                Button(onClick = onDone, modifier = Modifier.weight(1f)) { Text("Done") }
+                                Button(onClick = onDone, shapes = ButtonDefaults.shapes(), modifier = Modifier.weight(1f)) { Text("Done") }
                             }
                         }
                         else -> Text("Preparing…")
@@ -110,10 +114,10 @@ fun ShareScreen(vm: ShareViewModel, url: String, onDone: () -> Unit) {
                 Modifier.padding(padding).fillMaxSize(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
-            ) { CircularProgressIndicator() }
+            ) { LoadingIndicator(Modifier.size(64.dp)) }
             state.rows.isEmpty() -> Column(Modifier.padding(padding).padding(24.dp)) {
                 Text("Nothing to send: no files were shared with pic-sync.")
-                TextButton(onClick = onDone) { Text("Close") }
+                TextButton(onClick = onDone, shapes = ButtonDefaults.shapes()) { Text("Close") }
             }
             else -> LazyColumn(
                 Modifier.padding(padding).fillMaxSize(),
@@ -164,7 +168,7 @@ private fun ShareRowView(row: ShareRow, progress: Float?) {
             null -> {}
         }
         if (progress != null) {
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            LinearWavyProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
         }
     }
 }

@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -45,7 +43,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -69,12 +66,25 @@ import com.inakikani.picsync.data.monthLabel
 import com.inakikani.picsync.data.shortMonthLabel
 import java.time.YearMonth
 import java.time.ZoneId
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalIconToggleButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MediumFlexibleTopAppBar
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import com.inakikani.picsync.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -94,7 +104,7 @@ import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun GalleryScreen(vm: AppViewModel, state: UiState) {
     val ctx = LocalContext.current
@@ -158,16 +168,21 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         }
     }
 
+    // Android 16/17 style: a large title with the Mac's address under it, collapsing
+    // into a compact bar as the grid scrolls.
+    val topBarScroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("pic-sync")
-                        Text(state.serverUrl.orEmpty(), style = MaterialTheme.typography.labelSmall)
+            MediumFlexibleTopAppBar(
+                title = { Text("pic-sync") },
+                subtitle = { Text(state.serverUrl.orEmpty()) },
+                actions = {
+                    IconButton(onClick = { showSettings = true }, shapes = IconButtonDefaults.shapes()) {
+                        Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
                     }
                 },
-                actions = { TextButton(onClick = { showSettings = true }) { Text("Settings") } },
+                scrollBehavior = topBarScroll,
             )
         },
         bottomBar = {
@@ -293,7 +308,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
             confirmButton = {},
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(24.dp))
+                    LoadingIndicator(Modifier.size(40.dp))
                     Spacer(Modifier.width(16.dp))
                     Text(msg)
                 }
@@ -302,7 +317,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onChangeAccess: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
@@ -326,33 +341,48 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
         }
 
         var showFilters by remember { mutableStateOf(false) }
-        // Scrolls sideways when the chips don't fit (narrow phones, large font sizes).
+        // All / Not uploaded / Uploaded as a connected button group (Material 3 Expressive),
+        // with the filters as a separate toggle next to it.
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilterChip(
-                selected = state.uploadView == UploadView.ALL,
-                onClick = { vm.setUploadView(UploadView.ALL) },
-                label = { Text("All (${state.inScope.size})") },
-            )
-            FilterChip(
-                selected = state.uploadView == UploadView.NOT_UPLOADED,
-                onClick = { vm.setUploadView(UploadView.NOT_UPLOADED) },
-                label = { Text("Not uploaded (${state.notUploaded.size})") },
-            )
-            FilterChip(
-                selected = state.uploadView == UploadView.UPLOADED,
-                onClick = { vm.setUploadView(UploadView.UPLOADED) },
-                label = { Text("Uploaded (${state.uploaded.size})") },
-            )
-            FilterChip(
-                selected = state.filters.isActive,
-                onClick = { showFilters = true },
-                label = {
-                    Text(if (state.filters.isActive) "Filters (${state.filters.activeCount})" else "Filters")
-                },
-            )
+            Row(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+            ) {
+                val views = listOf(
+                    UploadView.ALL to ("All" to state.inScope.size),
+                    UploadView.NOT_UPLOADED to ("To upload" to state.notUploaded.size),
+                    UploadView.UPLOADED to ("Uploaded" to state.uploaded.size),
+                )
+                views.forEachIndexed { i, (view, label) ->
+                    ToggleButton(
+                        checked = state.uploadView == view,
+                        onCheckedChange = { vm.setUploadView(view) },
+                        modifier = Modifier.weight(1f).semantics { role = Role.RadioButton },
+                        shapes = when (i) {
+                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            views.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        },
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(label.first, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                            Text("${label.second}", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
+                    }
+                }
+            }
+            FilledTonalIconToggleButton(
+                checked = state.filters.isActive,
+                onCheckedChange = { showFilters = true },
+                shapes = IconButtonDefaults.toggleableShapes(),
+            ) {
+                Icon(painterResource(R.drawable.ic_tune), contentDescription = "Filters")
+            }
         }
         if (state.filters.isActive) {
             Row(
@@ -377,7 +407,7 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             UploadView.UPLOADED -> state.uploaded
         }
         when {
-            !state.mediaLoaded -> Centered { CircularProgressIndicator() }
+            !state.mediaLoaded -> Centered { LoadingIndicator(Modifier.size(64.dp)) }
             visible.isEmpty() -> Centered {
                 Text(
                     when {
@@ -506,7 +536,7 @@ private fun MonthHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
-            Text(monthLabel(month), style = MaterialTheme.typography.titleMedium)
+            Text(monthLabel(month), style = MaterialTheme.typography.titleMediumEmphasized)
             Text(
                 if (pending > 0) "$total · $pending to upload" else "$total · all uploaded",
                 style = MaterialTheme.typography.labelMedium,
@@ -514,7 +544,7 @@ private fun MonthHeader(
             )
         }
         if (pending > 0) {
-            TextButton(onClick = onToggle, enabled = enabled) {
+            TextButton(onClick = onToggle, enabled = enabled, shapes = ButtonDefaults.shapes()) {
                 Text(if (allSelected) "Deselect" else "Select $pending")
             }
         }
@@ -575,19 +605,24 @@ private fun ActionBar(
     onTrash: () -> Unit,
     onShowFailures: () -> Unit,
 ) {
-    Surface(tonalElevation = 3.dp) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             val up = state.upload
             if (up != null) {
-                Text("Uploading ${up.index + 1} of ${up.total}")
-                LinearProgressIndicator(
+                Text("Uploading ${up.index + 1} of ${up.total}", style = MaterialTheme.typography.titleSmallEmphasized)
+                LinearWavyProgressIndicator(
                     progress = { (up.index + uploadFraction.value) / up.total },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                OutlinedButton(onClick = onCancel, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth()) {
+                    Text("Cancel")
+                }
             } else {
                 IdleActions(state, onSelectNotUploaded, onClear, onUpload, onTrash, onShowFailures)
             }
@@ -606,7 +641,7 @@ private fun IdleActions(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.failed.isNotEmpty()) {
-            TextButton(onClick = onShowFailures, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = onShowFailures, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth()) {
                 Text("${state.failed.size} failed to upload · see why", color = MaterialTheme.colorScheme.error)
             }
         }
@@ -614,23 +649,31 @@ private fun IdleActions(
             if (state.selected.isEmpty()) {
                 OutlinedButton(
                     onClick = onSelectNotUploaded,
+                    shapes = ButtonDefaults.shapes(),
                     enabled = state.notUploaded.isNotEmpty(),
-                    modifier = Modifier.weight(1f),
-                ) { Text("Select not uploaded") }
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                ) { Text("Select not uploaded", maxLines = 1) }
             } else {
-                OutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = onClear, shapes = ButtonDefaults.shapes(), modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
                     Text("Clear (${state.selected.size})")
                 }
             }
             Button(
                 onClick = onUpload,
+                shapes = ButtonDefaults.shapes(),
                 enabled = state.selected.isNotEmpty(),
-                modifier = Modifier.weight(1f),
-            ) { Text(if (state.selected.isEmpty()) "Upload" else "Upload ${state.selected.size}") }
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            ) {
+                Icon(painterResource(R.drawable.ic_cloud_upload), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text(if (state.selected.isEmpty()) "Upload" else "Upload ${state.selected.size}")
+            }
         }
         if (state.uploadedOnPhone > 0) {
-            FilledTonalButton(onClick = onTrash, modifier = Modifier.fillMaxWidth()) {
-                Text("Move ${state.uploadedOnPhone} uploaded${state.scopeLabel} to trash")
+            FilledTonalButton(onClick = onTrash, shapes = ButtonDefaults.shapes(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Icon(painterResource(R.drawable.ic_delete), contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text("Move ${state.uploadedOnPhone} uploaded${state.scopeLabel} to trash", maxLines = 1)
             }
         }
     }
@@ -651,39 +694,57 @@ private fun MediaCell(
     onOpen: () -> Unit,
 ) {
     val thumb by produceState<ImageBitmap?>(null, item.id) { value = loadThumbnail(item) }
-    val shape = RoundedCornerShape(4.dp)
+    // Selecting shrinks the photo into a rounded tile with a springy motion, like Google
+    // Photos on Android 16/17; the selection tint shows around it.
+    val motion = MaterialTheme.motionScheme
+    val inset by animateDpAsState(if (selected) 10.dp else 0.dp, motion.fastSpatialSpec(), label = "inset")
+    val corner by animateDpAsState(if (selected) 16.dp else 4.dp, motion.fastSpatialSpec(), label = "corner")
     Box(
         Modifier
-            .padding(2.dp)
+            .padding(1.dp)
             .aspectRatio(1f)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        thumb?.let {
-            Image(
-                it,
-                contentDescription = item.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().then(if (excluded) Modifier.alpha(0.4f) else Modifier),
-            )
+        Box(Modifier.fillMaxSize().padding(inset).clip(RoundedCornerShape(corner))) {
+            thumb?.let {
+                Image(
+                    it,
+                    contentDescription = item.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().then(if (excluded) Modifier.alpha(0.4f) else Modifier),
+                )
+            }
         }
         if (item.isVideo) {
-            Text("▶", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(4.dp))
+            Icon(
+                painterResource(R.drawable.ic_play_arrow),
+                contentDescription = "Video",
+                tint = Color.White,
+                modifier = Modifier.align(Alignment.BottomStart).padding(4.dp).size(20.dp),
+            )
         }
         when {
-            excluded -> Badge("⊘", MaterialTheme.colorScheme.error)
-            progress != null -> Badge("${(progress() * 100).toInt()}%", MaterialTheme.colorScheme.primary)
-            uploaded -> Badge("✓", Color(0xFF16A34A))
-            failed -> Badge("!", MaterialTheme.colorScheme.error)
+            excluded -> StatusBadge(R.drawable.ic_block, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, "Skipped")
+            progress != null -> Box(
+                Modifier.align(Alignment.TopEnd).padding(4.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            ) {
+                Text("${(progress() * 100).toInt()}%", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
+            }
+            uploaded -> StatusBadge(R.drawable.ic_check, MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, "On the Mac")
+            failed -> StatusBadge(R.drawable.ic_priority_high, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, "Upload failed")
         }
         if (selected) {
             Box(
-                Modifier.align(Alignment.TopStart).padding(4.dp).size(22.dp)
+                Modifier.align(Alignment.TopStart).padding(4.dp).size(24.dp)
                     .background(MaterialTheme.colorScheme.primary, CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text("✓", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall) }
+            ) {
+                Icon(painterResource(R.drawable.ic_check), contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+            }
         }
         if (progress != null) {
             LinearProgressIndicator(
@@ -697,48 +758,19 @@ private fun MediaCell(
                 .background(Color.Black.copy(alpha = 0.45f))
                 .clickable(onClickLabel = "View full screen", onClick = onOpen),
             contentAlignment = Alignment.Center,
-        ) { FullScreenIcon(Modifier.size(14.dp)) }
-    }
-}
-
-/**
- * The usual "full screen" icon: four corner brackets. Drawn rather than a text
- * glyph (like ⤢), which sits on a font baseline and can't be centred exactly.
- */
-@Composable
-private fun FullScreenIcon(modifier: Modifier = Modifier, color: Color = Color.White) {
-    Canvas(modifier) {
-        val stroke = 2.dp.toPx()
-        val arm = size.minDimension * 0.28f // length of each bracket arm (longer reads as a square)
-        val inset = stroke / 2 // keep the strokes inside the canvas
-        val l = inset
-        val t = inset
-        val r = size.width - inset
-        val b = size.height - inset
-        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
-            drawPath(
-                Path().apply {
-                    moveTo(x + dx * arm, y)
-                    lineTo(x, y)
-                    lineTo(x, y + dy * arm)
-                },
-                color,
-                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
-            )
+        ) {
+            Icon(painterResource(R.drawable.ic_fullscreen), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
         }
-        corner(l, t, 1f, 1f)
-        corner(r, t, -1f, 1f)
-        corner(l, b, 1f, -1f)
-        corner(r, b, -1f, -1f)
     }
 }
 
+/** A small round status icon in the thumbnail's top-right corner (on the Mac, skipped, failed). */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.Badge(text: String, color: Color) {
+private fun androidx.compose.foundation.layout.BoxScope.StatusBadge(icon: Int, container: Color, content: Color, label: String) {
     Box(
-        Modifier.align(Alignment.TopEnd).padding(4.dp).background(color, RoundedCornerShape(10.dp))
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    ) { Text(text, color = Color.White, style = MaterialTheme.typography.labelSmall) }
+        Modifier.align(Alignment.TopEnd).padding(4.dp).size(22.dp).background(container, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) { Icon(painterResource(icon), contentDescription = label, tint = content, modifier = Modifier.size(15.dp)) }
 }
 
 @Composable
@@ -748,12 +780,14 @@ private fun NoAccess(onGrant: () -> Unit, onSettings: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Text("Allow access to your photos", style = MaterialTheme.typography.headlineSmallEmphasized, textAlign = TextAlign.Center)
         Text(
             "pic-sync needs access to your photos and videos to upload them.",
             textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Button(onClick = onGrant) { Text("Allow access") }
-        TextButton(onClick = onSettings) { Text("Open app settings") }
+        Button(onClick = onGrant, shapes = ButtonDefaults.shapes()) { Text("Allow access") }
+        TextButton(onClick = onSettings, shapes = ButtonDefaults.shapes()) { Text("Open app settings") }
     }
 }
 
