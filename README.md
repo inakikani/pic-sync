@@ -127,6 +127,8 @@ The app follows Android 16/17's design language, Material 3 Expressive. It uses 
 
 ## Development
 
+Keeping the app smooth and light: see [docs/performance.md](docs/performance.md) before changing the gallery, image loading, uploads or the server's upload path.
+
 The server needs Go 1.25 or newer (`go` downloads it automatically if yours is older).
 
 ```sh
