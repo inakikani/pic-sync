@@ -87,6 +87,10 @@ data class UiState(
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
+    init {
+        AppLog.i("startup: view model construction started")
+    }
+
     private val resolver = app.contentResolver
     private val repo = MediaRepository(resolver) {
         app.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED

@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.inakikani.picsync.data.AppLog
@@ -20,7 +21,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AppLog.i("startup: activity created")
         enableEdgeToEdge()
-        setContent { PicSyncTheme { PicSyncApp() } }
+        setContent {
+            remember { AppLog.i("startup: building the first screen"); 0 }
+            PicSyncTheme { PicSyncApp() }
+        }
+        var drawn = false
+        window.decorView.viewTreeObserver.addOnDrawListener {
+            if (!drawn) {
+                drawn = true
+                AppLog.i("startup: first frame drawn")
+            }
+        }
     }
 
     override fun onResume() {
@@ -30,7 +41,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PicSyncApp(vm: AppViewModel = viewModel()) {
+private fun PicSyncApp() {
+    remember { AppLog.i("startup: getting the view model"); 0 }
+    val vm: AppViewModel = viewModel()
     val state by vm.state.collectAsStateWithLifecycle()
     val connected = state.serverUrl != null
     LaunchedEffect(connected) {
