@@ -17,6 +17,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,7 @@ fun ConnectScreen(vm: AppViewModel, state: UiState) {
     var manual by rememberSaveable { mutableStateOf("") }
     var networkDenied by remember { mutableStateOf(false) }
     val gate = rememberLocalNetworkGate { networkDenied = true }
+    LaunchedEffect(Unit) { AppLog.i("startup: connect screen shown") }
 
     fun connect(url: String) {
         networkDenied = false

@@ -121,6 +121,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         app.registerComponentCallbacks(memoryCallbacks)
+        AppLog.i("startup: view model created (server ${_state.value.serverUrl ?: "not set"}, ${_state.value.excluded.size} skipped)")
     }
 
     private var uploadJob: Job? = null
@@ -171,6 +172,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---- gallery ----
 
     fun refreshMedia() {
+        AppLog.d("media: reading the photo library…")
         viewModelScope.launch {
             val started = System.nanoTime()
             val (media, records) = try {

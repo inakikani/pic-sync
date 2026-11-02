@@ -101,10 +101,12 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
     // Android 17 left an invisible permission screen on top of the app, i.e. a blank screen.
     // It's offered in Settings instead.
     LaunchedEffect(Unit) {
+        AppLog.i("startup: gallery shown, photo access $access")
         if (access == MediaAccess.NONE) askMediaPermissions("no photo access yet")
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         access = mediaAccess(ctx)
+        AppLog.d("gallery: resumed, photo access $access")
         if (access != MediaAccess.NONE) vm.refreshMedia()
     }
 
