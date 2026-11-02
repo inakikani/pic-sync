@@ -59,6 +59,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.inakikani.picsync.data.AppLog
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.derivedStateOf
+import com.inakikani.picsync.data.MonthGroup
+import com.inakikani.picsync.data.groupByMonth
+import com.inakikani.picsync.data.monthLabel
+import com.inakikani.picsync.data.shortMonthLabel
+import java.time.YearMonth
+import java.time.ZoneId
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -364,29 +373,104 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
             }
             else -> {
                 val fraction = vm.uploadFraction.collectAsStateWithLifecycle()
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 110.dp),
-                    contentPadding = PaddingValues(2.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(visible, key = { it.id }) { item ->
-                        val up = state.upload
-                        MediaCell(
-                            item = item,
-                            loadThumbnail = vm::thumbnail,
-                            uploaded = item.id in state.records,
-                            failed = item.id in state.failed,
-                            selected = item.id in state.selected,
-                            excluded = item.id in state.excluded,
-                            // A lambda, so only this cell re-renders as the percentage changes.
-                            progress = if (up?.currentId == item.id) ({ fraction.value }) else null,
-                            onClick = { vm.toggle(item.id) },
-                            onLongClick = { vm.toggleExcluded(item.id) },
-                        )
+                // Month sections, like Google Photos: a full-width "November 2026" header
+                // above each month's photos (newest first, by date taken).
+                val months = remember(visible) { MonthIndex(groupByMonth(visible, ZoneId.systemDefault()) { it.takenAt }) }
+                val gridState = rememberLazyGridState()
+                // Month of the first visible row, shown in a label while scrolling.
+                val scrollMonth by remember(months) {
+                    derivedStateOf { months.monthAt(gridState.firstVisibleItemIndex) }
+                }
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = 110.dp),
+                        contentPadding = PaddingValues(2.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        for (group in months.groups) {
+                            item(
+                                key = "month-${group.month}",
+                                span = { GridItemSpan(maxLineSpan) },
+                                contentType = "month",
+                            ) {
+                                MonthHeader(
+                                    group.month,
+                                    total = group.items.size,
+                                    pending = group.items.count { it.id !in state.records && it.id !in state.excluded },
+                                )
+                            }
+                            items(group.items, key = { it.id }, contentType = { "photo" }) { item ->
+                                val up = state.upload
+                                MediaCell(
+                                    item = item,
+                                    loadThumbnail = vm::thumbnail,
+                                    uploaded = item.id in state.records,
+                                    failed = item.id in state.failed,
+                                    selected = item.id in state.selected,
+                                    excluded = item.id in state.excluded,
+                                    // A lambda, so only this cell re-renders as the percentage changes.
+                                    progress = if (up?.currentId == item.id) ({ fraction.value }) else null,
+                                    onClick = { vm.toggle(item.id) },
+                                    onLongClick = { vm.toggleExcluded(item.id) },
+                                )
+                            }
+                        }
+                    }
+                    if (gridState.isScrollInProgress && gridState.firstVisibleItemIndex > 0) {
+                        scrollMonth?.let { month ->
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.inverseSurface,
+                                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                                shadowElevation = 4.dp,
+                                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                            ) {
+                                Text(
+                                    shortMonthLabel(month),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/** Month groups plus the grid index where each header sits, to tell which month is on screen. */
+private class MonthIndex(val groups: List<MonthGroup<MediaItem>>) {
+    private val headerAt = IntArray(groups.size).also { starts ->
+        var index = 0
+        groups.forEachIndexed { i, g ->
+            starts[i] = index
+            index += 1 + g.items.size // header + its photos
+        }
+    }
+
+    /** The month that grid item [index] (header or photo) belongs to. */
+    fun monthAt(index: Int): YearMonth? {
+        if (groups.isEmpty()) return null
+        val pos = headerAt.binarySearch(index)
+        val group = if (pos >= 0) pos else (-pos - 2).coerceAtLeast(0)
+        return groups[group].month
+    }
+}
+
+@Composable
+private fun MonthHeader(month: YearMonth, total: Int, pending: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text(monthLabel(month), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Text(
+            if (pending > 0) "$total · $pending to upload" else "$total · all uploaded",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

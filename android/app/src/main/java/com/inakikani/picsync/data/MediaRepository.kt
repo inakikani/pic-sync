@@ -48,7 +48,7 @@ class MediaRepository(
     private val canReadLocation: () -> Boolean,
 ) {
 
-    /** All images and videos visible to the app, newest first. Trashed and pending items are excluded. */
+    /** All images and videos visible to the app, newest taken first. Trashed and pending items are excluded. */
     fun query(): List<MediaItem> {
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
@@ -102,6 +102,9 @@ class MediaRepository(
                 )
             }
         }
+        // Newest first by the date taken (what the gallery's month headers use), not by
+        // when the file arrived on the phone: received/downloaded photos sort into their month.
+        items.sortByDescending { it.takenAt }
         return items
     }
 
