@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -27,6 +27,7 @@ const apiVersion = "1"
 type Config struct {
 	UploadDir string `json:"upload_dir"`
 	Listen    string `json:"listen"`
+	LogFile   string `json:"log_file,omitempty"` // CLI mode: also log to this file (app mode always logs to ~/Library/Logs)
 }
 
 func loadConfig(path string) (Config, error) {
@@ -41,12 +42,14 @@ func loadConfig(path string) (Config, error) {
 	if cfg.UploadDir == "" {
 		return cfg, errors.New("config: upload_dir is required")
 	}
-	if cfg.UploadDir == "~" || strings.HasPrefix(cfg.UploadDir, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return cfg, fmt.Errorf("expanding ~: %w", err)
+	for _, p := range []*string{&cfg.UploadDir, &cfg.LogFile} {
+		if *p == "~" || strings.HasPrefix(*p, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return cfg, fmt.Errorf("expanding ~: %w", err)
+			}
+			*p = filepath.Join(home, strings.TrimPrefix(*p, "~"))
 		}
-		cfg.UploadDir = filepath.Join(home, strings.TrimPrefix(cfg.UploadDir, "~"))
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = ":8080"
@@ -59,6 +62,7 @@ func main() {
 	mode := flag.String("mode", "auto", `UX to use: "cli" (terminal + QR), "app" (macOS dialogs + browser QR page), or "auto" (app when launched from pic-sync.app, cli otherwise)`)
 	fixDir := flag.String("fix-dates", "", "instead of serving, give files already in this folder the date they were taken (from EXIF/video metadata) and exit")
 	dryRun := flag.Bool("dry-run", false, "with -fix-dates: only show what would change")
+	debugLog := flag.Bool("debug", false, "log more detail (also requests for the Mac's own QR page)")
 	flag.Parse()
 
 	if *fixDir != "" {
@@ -83,10 +87,10 @@ func main() {
 		if configSet {
 			appConfig = *configPath
 		}
-		runApp(appConfig)
+		runApp(appConfig, *debugLog)
 		return
 	}
-	runCLI(*configPath)
+	runCLI(*configPath, *debugLog)
 }
 
 // resolveMode turns the -mode flag into "cli" or "app".
@@ -103,19 +107,38 @@ func resolveMode(mode string, inBundle bool) (string, error) {
 	return "", fmt.Errorf("invalid -mode %q: want cli, app or auto", mode)
 }
 
-func runCLI(configPath string) {
+func runCLI(configPath string, debugLog bool) {
+	setupLogging("", debugLog)
 	cfg, err := loadConfig(configPath)
 	if err != nil {
-		log.Fatal(err)
+		fatal("loading config", err)
 	}
+	if err := setupLogging(cfg.LogFile, debugLog); err != nil {
+		slog.Error("log file unavailable, logging to the terminal only", "err", err)
+	}
+	logStartup("mode", "cli", "config", configPath, "folder", cfg.UploadDir)
 	ln, url, err := startListening(cfg)
 	if err != nil {
-		log.Fatal(err)
+		fatal("starting server", err)
 	}
 	if art, err := renderQR(url); err == nil {
 		fmt.Printf("\nScan to open %s\n\n%s\n", url, art)
 	}
-	log.Fatal(http.Serve(ln, newMux(cfg.UploadDir)))
+	fatal("server stopped", serve(ln, newMux(cfg.UploadDir)))
+}
+
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err)
+	os.Exit(1)
+}
+
+// serve runs the HTTP server with request logging.
+func serve(ln net.Listener, h http.Handler) error {
+	srv := &http.Server{
+		Handler:  logRequests(h),
+		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelWarn),
+	}
+	return srv.Serve(ln)
 }
 
 // startListening creates the upload dir, opens the listener, logs every LAN URL
@@ -126,18 +149,22 @@ func startListening(cfg Config) (net.Listener, string, error) {
 	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("listening on %s (is another pic-sync already running?): %w", cfg.Listen, err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	log.Printf("saving uploads to %s", cfg.UploadDir)
 	ips := lanIPs()
+	if len(ips) == 0 {
+		slog.Warn("no LAN address found: is the Mac connected to Wi-Fi or Ethernet?")
+		ips = []string{"localhost"}
+	}
 	for _, ip := range ips {
-		log.Printf("open on your phone: http://%s:%d", ip, port)
+		slog.Info("address for the phone", "url", fmt.Sprintf("http://%s:%d", ip, port))
 	}
 	qrIP := ips[0]
 	if p := primaryIP(); p != "" {
 		qrIP = p
 	}
+	slog.Info("listening", "addr", ln.Addr().String(), "qr_url", fmt.Sprintf("http://%s:%d", qrIP, port))
 	return ln, fmt.Sprintf("http://%s:%d", qrIP, port), nil
 }
 
@@ -165,8 +192,10 @@ func newStoreMux(st *store) *http.ServeMux {
 func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 	t := st.act.begin(r.ContentLength)
 	defer st.act.end(t)
+	client := clientIP(r)
 	mr, err := r.MultipartReader()
 	if err != nil {
+		slog.Warn("upload rejected: not a multipart form", "client", client, "content_type", r.Header.Get("Content-Type"))
 		httpError(w, http.StatusBadRequest, "expected multipart/form-data")
 		return
 	}
@@ -178,8 +207,11 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 			break
 		}
 		if err != nil {
-			st.act.recordError("", fmt.Errorf("reading upload: %w", err))
-			httpError(w, http.StatusBadRequest, "reading upload: "+err.Error())
+			// Typically the connection dropped between files (phone locked, Wi-Fi lost).
+			err = fmt.Errorf("upload interrupted: %w", err)
+			st.act.recordError("", err)
+			slog.Warn("upload failed", "client", client, "err", err, "files_saved_before", len(saved))
+			httpError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if part.FileName() == "" {
@@ -189,30 +221,59 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 			part.Close()
 			continue // ordinary form field
 		}
-		t.setName(part.FileName())
-		res, err := st.save(part.FileName(), t.reader(part), clientTime)
+		name := part.FileName()
+		t.setName(name)
+		start := time.Now()
+		res, err := st.save(name, t.reader(part), clientTime)
+		took := time.Since(start)
 		clientTime = time.Time{} // applies to the next file only
 		part.Close()
 		if err != nil {
-			st.act.recordError(part.FileName(), err)
-			log.Printf("upload failed (%q): %v", part.FileName(), err)
-			httpError(w, http.StatusBadRequest, err.Error())
+			st.act.recordError(name, err)
+			code, level := http.StatusBadRequest, slog.LevelWarn
+			if !isClientError(err) {
+				code, level = http.StatusInternalServerError, slog.LevelError // the Mac's problem
+			}
+			slog.Log(r.Context(), level, "upload failed", "file", name, "client", client, "took", roundDur(took), "err", err)
+			httpError(w, code, err.Error())
 			return
 		}
-		if res.Duplicate {
-			log.Printf("skipped %s: duplicate of %s", res.Original, res.Name)
-		} else {
-			log.Printf("saved %s", res.Name)
-		}
+		logSaved(res, client, took)
 		st.act.recordSaved(res)
 		saved = append(saved, res)
 	}
 	if len(saved) == 0 {
+		slog.Warn("upload rejected: no file in the request", "client", client)
 		httpError(w, http.StatusBadRequest, "no files in request")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"saved": saved})
+}
+
+func logSaved(res savedFile, client string, took time.Duration) {
+	args := []any{"file", res.Name}
+	if res.Original != res.Name {
+		args = append(args, "sent_as", res.Original)
+	}
+	args = append(args, "size", formatBytes(res.Size), "took", roundDur(took))
+	if sp := speed(res.Size, took); sp != "" {
+		args = append(args, "speed", sp)
+	}
+	args = append(args, "client", client, "sha256", res.SHA256[:12])
+	if res.Duplicate {
+		slog.Info("duplicate, not stored (identical file already in the folder)", args...)
+		return
+	}
+	switch res.DateSource {
+	case "file":
+		args = append(args, "date", res.Date.Format("2006-01-02 15:04"), "date_from", "file metadata")
+	case "client":
+		args = append(args, "date", res.Date.Format("2006-01-02 15:04"), "date_from", "phone (no date in file)")
+	default:
+		args = append(args, "date_from", "none (upload time kept)")
+	}
+	slog.Info("saved", args...)
 }
 
 // sanitizeName strips any directory components a client may send.

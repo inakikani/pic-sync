@@ -3,9 +3,10 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,36 @@ type savedFile struct {
 	Size      int64  `json:"size"`      // bytes received
 	SHA256    string `json:"sha256"`    // hex SHA-256 of the received bytes
 	Duplicate bool   `json:"duplicate"` // identical content already existed; nothing new written
+
+	Date       time.Time `json:"-"` // date given to the saved file (zero: upload time kept)
+	DateSource string    `json:"-"` // "file" (EXIF/video header), "client", or "" (none)
+}
+
+// clientError is an upload problem caused by the request (bad name, connection
+// dropped mid-file), answered with 400. Any other error is the Mac's (disk full,
+// no permission) and gets 500, so the two can be told apart on the phone and in the log.
+type clientError struct{ error }
+
+func (e clientError) Unwrap() error { return e.error }
+
+func isClientError(err error) bool {
+	var c clientError
+	return errors.As(err, &c)
+}
+
+// srcReader remembers whether a copy failed while reading the upload (the
+// client) rather than while writing the file (the Mac).
+type srcReader struct {
+	r   io.Reader
+	err error
+}
+
+func (s *srcReader) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if err != nil && err != io.EOF {
+		s.err = err
+	}
+	return n, err
 }
 
 // store writes uploads into dir and detects content duplicates.
@@ -67,7 +98,7 @@ func (s *store) SetDir(dir string) {
 func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (savedFile, error) {
 	name, err := sanitizeName(rawName)
 	if err != nil {
-		return savedFile{}, err
+		return savedFile{}, clientError{err}
 	}
 	dir := s.Dir() // fixed for this upload even if the folder is changed meanwhile
 
@@ -80,9 +111,13 @@ func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (saved
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath) // no-op after successful rename
 	h := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, h), src)
+	in := &srcReader{r: src}
+	size, err := io.Copy(io.MultiWriter(tmp, h), in)
 	if err != nil {
 		tmp.Close()
+		if in.err != nil {
+			return savedFile{}, clientError{fmt.Errorf("upload interrupted after %s: %w", formatBytes(size), err)}
+		}
 		return savedFile{}, fmt.Errorf("writing file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -108,9 +143,11 @@ func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (saved
 	}
 	// Give the copy the original's date instead of the upload time. On macOS an
 	// older modification time also moves Finder's "Created" date back.
-	if when := fileDate(tmpPath, clientTime); !when.IsZero() {
+	if when, src := fileDate(tmpPath, clientTime); !when.IsZero() {
 		if err := os.Chtimes(tmpPath, when, when); err != nil {
-			log.Printf("setting date of %s: %v", name, err) // not fatal: the bytes are intact
+			slog.Warn("setting file date failed", "file", name, "err", err) // not fatal: the bytes are intact
+		} else {
+			res.Date, res.DateSource = when, src
 		}
 	}
 	final, err := claimName(dir, name)
@@ -133,14 +170,14 @@ func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (saved
 // file, else the client's date if plausible, else zero (keep the upload time).
 // The file's own date wins because browsers often send the time the file was
 // picked (iOS) rather than when the photo was taken.
-func fileDate(path string, clientTime time.Time) time.Time {
+func fileDate(path string, clientTime time.Time) (time.Time, string) {
 	if t, ok := takenTimeOfFile(path); ok {
-		return t
+		return t, "file"
 	}
 	if !clientTime.IsZero() && plausible(clientTime) {
-		return clientTime
+		return clientTime, "client"
 	}
-	return time.Time{}
+	return time.Time{}, ""
 }
 
 // useCacheFor drops the hash cache when uploads move to another folder, so

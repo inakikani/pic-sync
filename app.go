@@ -10,8 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -37,7 +36,7 @@ func loadAppConfig(path string) Config {
 	cfg := Config{Listen: ":8080"}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			log.Printf("ignoring invalid config %s: %v", path, err)
+			slog.Warn("ignoring invalid config", "path", path, "err", err)
 		}
 	}
 	if cfg.Listen == "" {
@@ -56,11 +55,10 @@ func saveAppConfig(path string, cfg Config) error {
 
 // runApp runs the dialog-driven UX. cfgPath overrides the default app config
 // location (~/Library/Application Support/pic-sync/config.json) when non-empty.
-func runApp(cfgPath string) {
+func runApp(cfgPath string, debugLog bool) {
 	home, _ := os.UserHomeDir()
-	if f, err := os.OpenFile(filepath.Join(home, "Library", "Logs", "pic-sync.log"),
-		os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
-		log.SetOutput(io.MultiWriter(os.Stderr, f)) // stderr is visible when started from a terminal
+	if err := setupLogging(filepath.Join(home, "Library", "Logs", "pic-sync.log"), debugLog); err != nil {
+		slog.Error("log file unavailable, logging to stderr only", "err", err)
 	}
 
 	if cfgPath == "" {
@@ -70,6 +68,7 @@ func runApp(cfgPath string) {
 
 	dir, err := chooseFolder(cfg.UploadDir)
 	if errors.Is(err, errCanceled) {
+		slog.Info("folder choice cancelled, quitting")
 		return
 	}
 	if err != nil {
@@ -77,9 +76,14 @@ func runApp(cfgPath string) {
 	}
 	cfg.UploadDir = filepath.Clean(dir)
 	if err := saveAppConfig(cfgPath, cfg); err != nil {
-		log.Printf("saving config: %v", err)
+		slog.Error("saving config", "path", cfgPath, "err", err)
 	}
 
+	ui := "menu bar"
+	if !trayAvailable {
+		ui = "window (built without the menu bar)"
+	}
+	logStartup("mode", "app", "ui", ui, "config", cfgPath, "folder", cfg.UploadDir)
 	ln, url, err := startListening(cfg)
 	if err != nil {
 		fatalAlert("Could not start the server", err)
@@ -91,7 +95,7 @@ func runApp(cfgPath string) {
 	mux := newStoreMux(st)
 	addStatusPage(mux, st.Dir, url)
 	go func() {
-		fatalAlert("The server stopped", http.Serve(ln, mux))
+		fatalAlert("The server stopped", serve(ln, mux))
 	}()
 
 	if trayAvailable {
@@ -100,7 +104,7 @@ func runApp(cfgPath string) {
 	} else {
 		runningUI(cfg.UploadDir, url, statusURL)
 	}
-	log.Print("stopped by user")
+	slog.Info("stopped by user")
 }
 
 // trayApp is the state of the menu bar UI (see tray.go).
@@ -127,7 +131,7 @@ func runningUI(dir, phoneURL, statusURL string) {
 		for {
 			button, err := qrAlert(msg, qrPath, "Open in browser", "Stop")
 			if err != nil {
-				log.Printf("QR window unavailable, falling back to dialog: %v", err)
+				slog.Warn("QR window unavailable, falling back to dialog", "err", err)
 				break
 			}
 			if button != "Open in browser" {
@@ -136,7 +140,7 @@ func runningUI(dir, phoneURL, statusURL string) {
 			openBrowser(statusURL)
 		}
 	} else {
-		log.Printf("rendering QR image: %v", err)
+		slog.Error("rendering QR image", "err", err)
 	}
 
 	openBrowser(statusURL)
@@ -306,7 +310,7 @@ func runningDialog(dir, url string) string {
 	return button returned of (display dialog (item 1 of argv) with title "pic-sync" buttons {"Show QR code", "Stop"} default button "Show QR code")
 end run`, msg)
 	if err != nil {
-		log.Printf("dialog: %v", err)
+		slog.Warn("dialog failed", "err", err)
 		return "Stop"
 	}
 	return out
@@ -319,7 +323,7 @@ func fatalAlert(title string, err error) {
 
 // errorAlert shows a critical alert and logs the error, without exiting.
 func errorAlert(title string, err error) {
-	log.Printf("%s: %v", title, err)
+	slog.Error(title, "err", err)
 	osascript(`on run argv
 	activate
 	display alert (item 1 of argv) message (item 2 of argv) as critical
@@ -329,12 +333,12 @@ end run`, title, err.Error())
 // openPath opens a file or folder in Finder.
 func openPath(path string) {
 	if err := exec.Command("open", path).Run(); err != nil {
-		log.Printf("opening %s: %v", path, err)
+		slog.Warn("opening in Finder failed", "path", path, "err", err)
 	}
 }
 
 func openBrowser(url string) {
 	if err := exec.Command("open", url).Run(); err != nil {
-		log.Printf("opening browser: %v", err)
+		slog.Warn("opening browser failed", "err", err)
 	}
 }

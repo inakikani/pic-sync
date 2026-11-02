@@ -9,7 +9,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +47,10 @@ func (t *trayApp) onReady() {
 	mFolder := systray.AddMenuItem("", "Open the upload folder in Finder")
 	mChange := systray.AddMenuItem("Change folder…", "Choose where uploads are saved")
 	systray.AddSeparator()
+	mLog := systray.AddMenuItem("Open log", "Show what pic-sync has been doing (opens in Console)")
+	if logFilePath == "" {
+		mLog.Disable()
+	}
 	mQuit := systray.AddMenuItem("Quit pic-sync", "Stop the server and quit")
 
 	// Only push changes to AppKit, so an idle menu bar does no work.
@@ -103,6 +107,8 @@ func (t *trayApp) onReady() {
 				openBrowser(t.statusURL)
 			case <-mFolder.ClickedCh:
 				openPath(t.st.Dir())
+			case <-mLog.ClickedCh:
+				openPath(logFilePath)
 			case <-mChange.ClickedCh:
 				go func() {
 					t.changeFolder()
@@ -129,14 +135,14 @@ func (t *trayApp) showQR() {
 	msg := fmt.Sprintf("Scan with your phone, or open:\n%s\n\nPhotos are saved to:\n%s", t.phoneURL, t.st.Dir())
 	qrPath, err := writeTempQR(t.phoneURL)
 	if err != nil {
-		log.Printf("rendering QR image: %v", err)
+		slog.Error("rendering QR image", "err", err)
 		openBrowser(t.statusURL)
 		return
 	}
 	defer os.Remove(qrPath)
 	button, err := qrAlert(msg, qrPath, "Close", "Open in browser")
 	if err != nil {
-		log.Printf("QR window unavailable, opening browser instead: %v", err)
+		slog.Warn("QR window unavailable, opening browser instead", "err", err)
 		openBrowser(t.statusURL)
 		return
 	}
@@ -167,9 +173,9 @@ func (t *trayApp) changeFolder() {
 	t.st.SetDir(dir)
 	t.cfg.UploadDir = dir
 	if err := saveAppConfig(t.cfgPath, t.cfg); err != nil {
-		log.Printf("saving config: %v", err)
+		slog.Error("saving config", "path", t.cfgPath, "err", err)
 	}
-	log.Printf("upload folder changed to %s", dir)
+	slog.Info("upload folder changed", "folder", dir)
 }
 
 func shortPath(p string) string {
@@ -177,11 +183,4 @@ func shortPath(p string) string {
 		return "~" + strings.TrimPrefix(p, home)
 	}
 	return p
-}
-
-func truncate(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n-1]) + "…"
-	}
-	return s
 }
