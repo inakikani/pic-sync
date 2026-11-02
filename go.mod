@@ -1,6 +1,6 @@
 module pic-sync
 
-go 1.22
+go 1.25
 
 require (
 	fyne.io/systray v1.12.2

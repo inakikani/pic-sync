@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -12,9 +13,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -24,6 +27,7 @@ var indexHTML []byte
 // apiVersion is bumped when the HTTP API changes incompatibly.
 const apiVersion = "1"
 
+// Config is the JSON config file (CLI mode), and the app's saved settings.
 type Config struct {
 	UploadDir string `json:"upload_dir"`
 	Listen    string `json:"listen"`
@@ -124,21 +128,23 @@ func runCLI(configPath string, debugLog bool) {
 	if art, err := renderQR(url); err == nil {
 		fmt.Printf("\nScan to open %s\n\n%s\n", url, art)
 	}
-	fatal("server stopped", serve(ln, newMux(cfg.UploadDir)))
+
+	// Ctrl-C / kill: stop accepting uploads, let running ones finish briefly,
+	// and don't leave their temp files behind.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	st := newStore(cfg.UploadDir)
+	err = serve(ctx, ln, newStoreMux(st))
+	st.removeTemps()
+	if err != nil {
+		fatal("server stopped", err)
+	}
+	slog.Info("stopped")
 }
 
 func fatal(msg string, err error) {
 	slog.Error(msg, "err", err)
 	os.Exit(1)
-}
-
-// serve runs the HTTP server with request logging.
-func serve(ln net.Listener, h http.Handler) error {
-	srv := &http.Server{
-		Handler:  logRequests(h),
-		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelWarn),
-	}
-	return srv.Serve(ln)
 }
 
 // startListening creates the upload dir, opens the listener, logs every LAN URL
@@ -147,6 +153,7 @@ func startListening(cfg Config) (net.Listener, string, error) {
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		return nil, "", fmt.Errorf("creating upload folder: %w", err)
 	}
+	removeStaleTemps(cfg.UploadDir, time.Now())
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return nil, "", fmt.Errorf("listening on %s (is another pic-sync already running?): %w", cfg.Listen, err)
@@ -203,7 +210,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 	var clientTime time.Time // from an "mtime" field (ms since epoch) sent before the file
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -276,7 +283,6 @@ func logSaved(res savedFile, client string, took time.Duration) {
 	slog.Info("saved", args...)
 }
 
-// sanitizeName strips any directory components a client may send.
 // parseMillis reads a small form field holding milliseconds since the Unix
 // epoch, as sent by File.lastModified. Anything else gives the zero time.
 func parseMillis(r io.Reader) time.Time {
@@ -288,6 +294,8 @@ func parseMillis(r io.Reader) time.Time {
 	return time.UnixMilli(ms)
 }
 
+// sanitizeName strips any directory components a client may send and rejects
+// names that are empty, "." / "..", or hidden (dot files).
 func sanitizeName(raw string) (string, error) {
 	name := filepath.Base(strings.ReplaceAll(raw, "\\", "/"))
 	if name == "" || name == "." || name == ".." || name == "/" || strings.HasPrefix(name, ".") {
@@ -323,6 +331,8 @@ func httpError(w http.ResponseWriter, code int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+// lanIPs returns the Mac's IPv4 addresses that a phone on the LAN could reach
+// (no loopback or link-local). It may be empty.
 func lanIPs() []string {
 	var ips []string
 	addrs, err := net.InterfaceAddrs()
@@ -333,9 +343,6 @@ func lanIPs() []string {
 		if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() && !ipn.IP.IsLinkLocalUnicast() && ipn.IP.To4() != nil {
 			ips = append(ips, ipn.IP.String())
 		}
-	}
-	if len(ips) == 0 {
-		ips = append(ips, "localhost")
 	}
 	return ips
 }

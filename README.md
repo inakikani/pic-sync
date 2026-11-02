@@ -77,8 +77,11 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 - **Location (GPS):** the server stores exactly the bytes it receives. Android removes the location from photos it hands to apps that lack the *media location* permission. The Android app asks for it together with photo access; if photo access was already given (by an older version), allow it in the app under **Settings → Photo location**. Phone browsers can strip location too, before the file is sent, and the server can't restore it; on Android, use the app if you need location.
 - Existing files are never overwritten. A duplicate name is saved as `IMG_001 (1).jpg`, `IMG_001 (2).jpg`, and so on.
 - Uploads go to a hidden `.upload-*.part` temp file first and are renamed only once complete, so an interrupted upload leaves no partial file.
+  - **Stalled connections:** an upload fails if no data arrives for 30 s, e.g. when the phone leaves Wi-Fi.
+  - **Quitting:** quitting (Ctrl-C, **Quit pic-sync**, logout) gives uploads in progress 5 s to finish and removes their temp files.
+  - **Crashes:** temp files left by a crash are deleted at the next start.
 - Directory parts of client filenames are stripped, and hidden/dot names are rejected.
-- There is **no authentication**. Anyone on your LAN can upload while the server runs, so only run it on trusted networks and stop it (Ctrl-C) when you're done.
+- There is **no authentication**. Anyone on your LAN can upload while the server runs, so only run it on trusted networks and stop it (Ctrl-C) when you're done. Web pages from other sites can't upload through your browser: such cross-site requests are rejected with 403.
 
 ## macOS notes (both modes)
 
@@ -111,6 +114,8 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 [docs/troubleshooting.md](docs/troubleshooting.md) explains what is logged, how to read it, and fixes for common problems (phone can't connect, interrupted uploads, wrong dates, missing location, …).
 
 ## Development
+
+The server needs Go 1.25 or newer (`go` downloads it automatically if yours is older).
 
 ```sh
 make test                      # server tests + compile-check of the menu bar code

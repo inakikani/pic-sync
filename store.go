@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ type srcReader struct {
 
 func (s *srcReader) Read(p []byte) (int, error) {
 	n, err := s.r.Read(p)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		s.err = err
 	}
 	return n, err
@@ -66,7 +67,14 @@ type store struct {
 	cache    map[string]hashEntry
 	cacheDir string // folder the cache entries belong to
 	act      *activity
+
+	tmpMu sync.Mutex
+	temps map[string]struct{} // temp files of uploads in progress, removed on shutdown
 }
+
+// tempPattern names in-progress uploads. They're hidden (dot), so Finder and the
+// duplicate check ignore them.
+const tempPattern = ".upload-*.part"
 
 type hashEntry struct {
 	size    int64
@@ -75,7 +83,7 @@ type hashEntry struct {
 }
 
 func newStore(dir string) *store {
-	return &store{dir: dir, cache: map[string]hashEntry{}, act: newActivity()}
+	return &store{dir: dir, cache: map[string]hashEntry{}, act: newActivity(), temps: map[string]struct{}{}}
 }
 
 // Dir returns the current upload folder.
@@ -104,12 +112,16 @@ func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (saved
 
 	// Stream to a hidden temp file (hashing on the way) so a broken upload
 	// never appears under a real name.
-	tmp, err := os.CreateTemp(dir, ".upload-*.part")
+	tmp, err := os.CreateTemp(dir, tempPattern)
 	if err != nil {
 		return savedFile{}, err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op after successful rename
+	s.trackTemp(tmpPath, true)
+	defer func() {
+		os.Remove(tmpPath) // no-op after a successful rename
+		s.trackTemp(tmpPath, false)
+	}()
 	h := sha256.New()
 	in := &srcReader{r: src}
 	size, err := io.Copy(io.MultiWriter(tmp, h), in)
@@ -178,6 +190,58 @@ func fileDate(path string, clientTime time.Time) (time.Time, string) {
 		return clientTime, "client"
 	}
 	return time.Time{}, ""
+}
+
+func (s *store) trackTemp(path string, add bool) {
+	s.tmpMu.Lock()
+	defer s.tmpMu.Unlock()
+	if add {
+		s.temps[path] = struct{}{}
+	} else {
+		delete(s.temps, path)
+	}
+}
+
+// removeTemps deletes the temp files of uploads still in progress. Called on
+// shutdown: the process may exit before those uploads' own cleanup runs.
+func (s *store) removeTemps() {
+	s.tmpMu.Lock()
+	defer s.tmpMu.Unlock()
+	for p := range s.temps {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("removing temp file", "path", p, "err", err)
+		}
+		delete(s.temps, p)
+	}
+}
+
+// staleTempAge is how old a leftover temp file must be before it's deleted at
+// startup. Uploads in progress write to theirs continuously (and time out after
+// uploadIdleTimeout), so anything this old belongs to a crashed or killed run,
+// even if another pic-sync shares the folder.
+const staleTempAge = 10 * time.Minute
+
+// removeStaleTemps deletes temp files left in dir by a run that was killed or crashed.
+func removeStaleTemps(dir string, now time.Time) {
+	matches, err := filepath.Glob(filepath.Join(dir, tempPattern))
+	if err != nil {
+		return
+	}
+	removed := 0
+	for _, p := range matches {
+		info, err := os.Lstat(p)
+		if err != nil || !info.Mode().IsRegular() || now.Sub(info.ModTime()) < staleTempAge {
+			continue
+		}
+		if err := os.Remove(p); err != nil {
+			slog.Warn("removing leftover temp file", "path", p, "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		slog.Info("removed leftover temp files from an interrupted run", "count", removed, "folder", dir)
+	}
 }
 
 // useCacheFor drops the hash cache when uploads move to another folder, so

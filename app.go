@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,9 +16,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 )
 
 func inAppBundle() bool {
@@ -49,7 +52,10 @@ func saveAppConfig(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, _ := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
@@ -94,8 +100,29 @@ func runApp(cfgPath string, debugLog bool) {
 	st := newStore(cfg.UploadDir)
 	mux := newStoreMux(st)
 	addStatusPage(mux, st.Dir, url)
+
+	// The server runs until the user quits (quit) or macOS asks the app to stop,
+	// e.g. at logout (SIGTERM). Either way it shuts down cleanly: uploads in
+	// progress get a few seconds, and their temp files are removed.
+	base, quit := context.WithCancel(context.Background())
+	ctx, stop := signal.NotifyContext(base, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	served := make(chan struct{})
 	go func() {
-		fatalAlert("The server stopped", serve(ln, mux))
+		defer close(served)
+		err := serve(ctx, ln, mux)
+		st.removeTemps()
+		if err != nil {
+			fatalAlert("The server stopped", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		if base.Err() == nil { // a signal, not the user quitting: the UI is still up
+			<-served
+			slog.Info("stopped by signal")
+			os.Exit(0)
+		}
 	}()
 
 	if trayAvailable {
@@ -105,6 +132,8 @@ func runApp(cfgPath string, debugLog bool) {
 		runningUI(cfg.UploadDir, url, statusURL)
 	}
 	slog.Info("stopped by user")
+	quit()
+	<-served
 }
 
 // trayApp is the state of the menu bar UI (see tray.go).
@@ -237,7 +266,9 @@ func addStatusPage(mux *http.ServeMux, dir func() string, phoneURL string) {
 	}
 	mux.HandleFunc("GET /status", localOnly(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		statusTmpl.Execute(w, map[string]string{"URL": phoneURL, "Dir": dir()})
+		if err := statusTmpl.Execute(w, map[string]string{"URL": phoneURL, "Dir": dir()}); err != nil {
+			slog.Warn("rendering status page", "err", err)
+		}
 	}))
 	mux.HandleFunc("GET /qr.png", localOnly(func(w http.ResponseWriter, r *http.Request) {
 		img, err := qrPNG(phoneURL, 16) // large source image; CSS scales it to the window

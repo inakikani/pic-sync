@@ -35,7 +35,10 @@ time=2026-11-02T14:05:00.000 level=ERROR msg="upload failed" file=IMG_2000.jpg �
 | `request` | Every HTTP request: phone IP, path, status, size received, time and user agent. The agent tells you whether it was the Android app (`pic-sync-android/…`) or a browser. |
 | `saved` | A stored file: the name on disk, `sent_as` if it was renamed to avoid overwriting, size, speed, the first 12 hex digits of its SHA-256, and where its date came from (`file metadata`, `phone`, or `none`). |
 | `duplicate, not stored` | Identical content was already in the folder under `file`. Nothing new was written. |
-| `upload failed` (WARN, status 400) | The request was bad or the connection broke mid-file. Nothing is saved, and no partial file is left behind. |
+| `upload failed` (WARN, status 400) | The request was bad, or the connection broke or stalled (no data for 30 s, `i/o timeout`) mid-file. Nothing is saved, and no partial file is left behind. |
+| `request rejected: sent by another website` (status 403) | A web page from another site tried to upload through a browser. See *Uploads fail with 403* below. |
+| `shutting down`, `uploads still in progress were cut off`, `stopped` | The server stopped (Ctrl-C, **Quit pic-sync**, logout). Uploads get 5 s to finish. |
+| `removed leftover temp files from an interrupted run` | Startup cleanup of `.upload-*.part` files left by a crash or kill. |
 | `upload failed` (ERROR, status 500) | The Mac couldn't write the file: folder missing or not writable, disk full. The Android app shows *the Mac couldn't save it: …* |
 | `upload folder changed`, `saving config`, `QR window unavailable…`, `stopped by user` | Mac app events. |
 
@@ -80,6 +83,9 @@ On the phone:
 **Uploads stop halfway** (`upload interrupted` in the Mac log, *connection dropped* on the phone)
 - The phone locked or switched networks, or the browser went to the background. The Android app keeps the screen on while uploading; in a browser, keep the page open and the screen on.
 - Nothing partial is saved. Upload the same files again: files that did arrive are reported as *already on Mac*.
+
+**Uploads fail with 403 / *cross-origin request rejected***
+- The browser said the upload came from a different website than the pic-sync page. Open the page by the address pic-sync shows (scan the QR code) and upload from there. Don't use pages saved to disk, other sites, or a proxy or extension that rewrites the address.
 
 **ERROR `upload failed` / *the Mac couldn't save it***
 - **Folder removed or disk ejected:** choose the folder again (menu bar → **Change folder…**, or fix `upload_dir`).

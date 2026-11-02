@@ -107,8 +107,12 @@ func (r *rotatingFile) Write(p []byte) (int, error) {
 	defer r.mu.Unlock()
 	if r.size > 0 && r.size+int64(len(p)) > r.max {
 		r.f.Close()
-		os.Rename(r.path, r.path+".1")
+		if err := os.Rename(r.path, r.path+".1"); err != nil {
+			fmt.Fprintf(os.Stderr, "pic-sync: rotating log %s: %v\n", r.path, err)
+		}
 		if err := r.open(); err != nil {
+			// Can't log this to the file: report it on stderr; the next write tries again.
+			fmt.Fprintf(os.Stderr, "pic-sync: reopening log %s: %v\n", r.path, err)
 			return 0, err
 		}
 	}
@@ -224,6 +228,9 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets http.ResponseController reach the real connection (read deadlines).
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 type countingBody struct {
 	io.ReadCloser
