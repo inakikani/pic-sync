@@ -184,8 +184,9 @@ func macOSVersion() string {
 // ---- HTTP request log ----
 
 // quietPaths are logged at debug level unless they fail on the server side:
-// the Mac's own QR page and browsers' automatic favicon requests.
-var quietPaths = map[string]bool{"/status": true, "/qr.png": true, "/favicon.ico": true}
+// the Mac's own QR page, browsers' automatic favicon requests, and the upload
+// page's events (each already logged as its own "page: …" line).
+var quietPaths = map[string]bool{"/status": true, "/qr.png": true, "/favicon.ico": true, "/api/page-log": true}
 
 // logRequests logs one line per HTTP request: who, what, result, size, time.
 // Every phone connection shows up here, so "no request lines" means the phone

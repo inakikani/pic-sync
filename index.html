@@ -33,10 +33,75 @@ const btn = document.getElementById('go');
 const list = document.getElementById('list');
 const summary = document.getElementById('summary');
 
+// Reports what the browser's file picker does to the Mac's log ("page: …" lines),
+// so problems that never reach an upload (e.g. iOS handing over no files) can be seen.
+function report(event, data = {}) {
+  try {
+    const body = JSON.stringify(Object.assign({ event }, data));
+    if (!(navigator.sendBeacon && navigator.sendBeacon('/api/page-log', new Blob([body], { type: 'application/json' })))) {
+      fetch('/api/page-log', { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
+    }
+  } catch (e) { /* diagnostics must never break the page */ }
+}
+report('page opened', { touch: navigator.maxTouchPoints > 0 });
+
+let pickerOpenedAt = 0;   // when the picker was opened (0 = not open)
+let gotResult = false;    // change or cancel arrived since then
+
+input.addEventListener('click', () => {
+  pickerOpenedAt = Date.now();
+  gotResult = false;
+  report('picker opened');
+});
+
+// When the page gets focus back but the picker hasn't delivered anything yet, the
+// phone is usually still preparing the files (iOS converts or downloads them from
+// iCloud first). Say so instead of looking frozen, and log it.
+window.addEventListener('focus', () => {
+  if (!pickerOpenedAt) return;
+  setTimeout(() => {
+    if (pickerOpenedAt && !gotResult) {
+      summary.textContent = 'Waiting for your phone to hand over the selected files…';
+      report('picker closed, waiting for files', { seconds: Math.round((Date.now() - pickerOpenedAt) / 1000) });
+    }
+  }, 1500);
+});
+
+input.addEventListener('cancel', () => {
+  gotResult = true;
+  pickerOpenedAt = 0;
+  report('picker cancelled');
+});
+
 input.addEventListener('change', () => {
-  btn.disabled = input.files.length === 0;
-  summary.textContent = input.files.length ? `${input.files.length} file(s) selected` : '';
+  const files = Array.from(input.files);
+  const seconds = pickerOpenedAt ? Math.round((Date.now() - pickerOpenedAt) / 1000) : null;
+  gotResult = true;
+  pickerOpenedAt = 0;
+  btn.disabled = files.length === 0;
   list.innerHTML = '';
+  if (files.length === 0) {
+    summary.textContent = 'Your phone handed over no files. Try selecting fewer, or (on iPhone) Safari.';
+    report('picker returned nothing', { seconds });
+    return;
+  }
+  const types = {};
+  let bytes = 0, empty = 0;
+  for (const f of files) {
+    const t = f.type || '(no type)';
+    types[t] = (types[t] || 0) + 1;
+    bytes += f.size;
+    if (f.size === 0) empty++;
+  }
+  summary.textContent = `${files.length} file(s) selected` + (empty ? ` (${empty} empty: your phone didn't hand them over completely)` : '');
+  report(empty ? 'picker returned files, some empty: error' : 'picker returned files', {
+    count: files.length,
+    mb: Math.round(bytes / 1e5) / 10,
+    empty,
+    seconds,
+    types: Object.entries(types).map(([t, n]) => `${t}×${n}`).join(', '),
+    first: files[0].name,
+  });
 });
 
 function uploadOne(file, statusEl) {
@@ -61,10 +126,14 @@ function uploadOne(file, statusEl) {
       else {
         let msg = 'error ' + xhr.status;
         try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+        report('upload error', { name: file.name, type: file.type, mb: Math.round(file.size / 1e5) / 10, status: xhr.status, msg });
         statusEl.textContent = '✗ ' + msg; statusEl.className = 'err'; resolve('err');
       }
     };
-    xhr.onerror = () => { statusEl.textContent = '✗ network error'; statusEl.className = 'err'; resolve('err'); };
+    xhr.onerror = () => {
+      report('upload error', { name: file.name, type: file.type, mb: Math.round(file.size / 1e5) / 10, msg: 'network error' });
+      statusEl.textContent = '✗ network error'; statusEl.className = 'err'; resolve('err');
+    };
     xhr.send(fd);
   });
 }
@@ -88,6 +157,7 @@ btn.addEventListener('click', async () => {
   summary.textContent = `Done: ${count.ok} uploaded` +
     (count.dup ? `, ${count.dup} already on Mac` : '') +
     (count.err ? `, ${count.err} failed` : '');
+  report('upload batch done', count);
   input.value = '';
   input.disabled = false;
 });

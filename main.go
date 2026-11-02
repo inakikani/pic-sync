@@ -193,6 +193,9 @@ func newStoreMux(st *store) *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"app": "pic-sync", "version": apiVersion})
 	})
+	// The upload page reports what the browser's file picker did, so problems that
+	// never reach /upload (e.g. iOS returning no files) show up in the Mac's log.
+	mux.HandleFunc("POST /api/page-log", handlePageLog)
 	return mux
 }
 

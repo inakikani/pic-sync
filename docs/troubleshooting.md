@@ -39,6 +39,7 @@ time=2026-11-02T14:05:00.000 level=ERROR msg="upload failed" file=IMG_2000.jpg �
 | `request rejected: sent by another website` (status 403) | A web page from another site tried to upload through a browser. See *Uploads fail with 403* below. |
 | `shutting down`, `uploads still in progress were cut off`, `stopped` | The server stopped (Ctrl-C, **Quit pic-sync**, logout). Uploads get 5 s to finish. |
 | `removed leftover temp files from an interrupted run` | Startup cleanup of `.upload-*.part` files left by a crash or kill. |
+| `page: …` (e.g. `page: picker returned files count=3 types="image/heic×3"`) | What the upload page's file picker did in the phone's browser: opened, files handed over (count, size, types, seconds), cancelled, upload errors. Used to diagnose browser-side problems, e.g. on iPhone. |
 | `upload failed` (ERROR, status 500) | The Mac couldn't write the file: folder missing or not writable, disk full. The Android app shows *the Mac couldn't save it: …* |
 | `upload folder changed`, `saving config`, `QR window unavailable…`, `stopped by user` | Mac app events. |
 
@@ -113,7 +114,12 @@ On the phone:
 - **Browsers:** they may remove location before sending, and the Mac can't add it back. Use the Android app.
 
 **iPhone: tapping *Add* in the photo picker does nothing, or photos arrive as JPEG**
-- Update pic-sync: the page accepts HEIC/HEIF so iOS can send originals. If it still fails, check whether a `request` line with `path=/upload` appears at all.
+- The upload page reports what the phone's picker did as `page: …` lines in the Mac log. Open the page, pick photos, tap **Add**, then read the lines from the phone's IP:
+  - **`page: picker opened`** but nothing after it: the picker never handed anything back to the browser. Note which browser and how many items, and whether they're photos or videos, and whether they're in iCloud.
+  - **`page: picker closed, waiting for files`** followed later by **`page: picker returned files … seconds=N`**: iOS was preparing the files (converting, or downloading the originals from iCloud) for N seconds. The page now says it's waiting instead of looking frozen.
+  - **`page: picker returned nothing`** or **`… some empty: error`**: iOS returned no files, or empty ones. Try fewer items, or Safari.
+  - **`page: picker returned files`** but no `/upload` request: something on the page failed. **`page: upload error`** gives the status and message.
+- The page accepts HEIC/HEIF, so iOS can send originals instead of converting each photo to JPEG.
 
 **The Mac app doesn't start or shows no menu bar icon**
 - **macOS refuses to open it:** right-click → **Open** once, or run `xattr -cr pic-sync.app`.
