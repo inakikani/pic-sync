@@ -23,6 +23,7 @@ Copy `pic-sync.app` to `/Applications` (or anywhere) and double-click it:
    - **Show QR code…**: a window with the QR code to scan with the phone, the phone address and the folder
    - **Open QR page in browser**: the same, larger, in your browser
    - **Open folder** in Finder, and **Change folder…** (new uploads go to the new folder right away)
+   - **Open log**: what pic-sync has been doing, in Console (see [troubleshooting](docs/troubleshooting.md))
    - **Quit pic-sync**
 
 The menu bar item needs to be built on a Mac (`make app` there; it uses the Xcode command line tools, which come with `git`). An app built elsewhere, e.g. cross-compiled from Linux, falls back to a **pic-sync is running** window with the QR code and **Open in browser** / **Stop** buttons.
@@ -66,6 +67,7 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 |--------------|----------|---------|-------------------------------------------|
 | `upload_dir` | yes      |         | where files are written; `~` is expanded; created if missing |
 | `listen`     | no       | `:8080` | address/port to listen on                 |
+| `log_file`   | no       |         | CLI mode: also write the log to this file (capped at 5 MB, one `.1` copy kept). The app always logs to `~/Library/Logs/pic-sync.log` |
 
 ## Behaviour
 
@@ -100,6 +102,13 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 **Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
 
 **Permissions:** photos and videos (limited access works too) including their location, so uploads keep GPS data, and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.
+
+## Logs and troubleshooting
+
+- **Mac:** the log shows every request, saved file and error. It is in the terminal, or for the app in `~/Library/Logs/pic-sync.log` (menu bar → **Open log**). Add `-debug` for more detail.
+- **Android app:** tap a **!** photo to see why it failed. **Settings → Share diagnostics** sends the app's log.
+
+[docs/troubleshooting.md](docs/troubleshooting.md) explains what is logged, how to read it, and fixes for common problems (phone can't connect, interrupted uploads, wrong dates, missing location, …).
 
 ## Development
 

@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.inakikani.picsync.data.AppLog
 
 // ---- local network (Android 17+, targetSdk 37) ----
 
@@ -38,6 +39,7 @@ fun rememberLocalNetworkGate(onDenied: () -> Unit): (() -> Unit) -> Unit {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val action = pending
         pending = null
+        AppLog.i("permissions: local network ${if (granted) "granted" else "denied (the Mac can't be reached)"}")
         if (granted) action?.invoke() else onDenied()
     }
     return { action ->

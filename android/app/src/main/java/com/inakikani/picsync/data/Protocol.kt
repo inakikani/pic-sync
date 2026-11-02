@@ -35,7 +35,11 @@ fun parseUploadResponse(body: String): SavedFile = try {
 /** Human-readable message for a non-2xx response (`{"error": "..."}` if present). */
 fun parseServerError(body: String?, code: Int): String {
     val msg = body?.let { runCatching { JSONObject(it).optString("error") }.getOrNull() }
-    return if (msg.isNullOrBlank()) "Server error $code" else msg
+    return when {
+        msg.isNullOrBlank() -> "Server error $code"
+        code >= 500 -> "the Mac couldn't save it: $msg" // disk full, folder gone, no permission
+        else -> msg
+    }
 }
 
 /** True if a `/api/info` body identifies a pic-sync server. */

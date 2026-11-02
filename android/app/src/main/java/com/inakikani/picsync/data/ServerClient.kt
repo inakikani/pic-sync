@@ -13,7 +13,11 @@ data class UploadResult(
 )
 
 /** Blocking HTTP client for a pic-sync server. Call from a background thread. */
-class ServerClient(private val baseUrl: String) {
+class ServerClient(
+    private val baseUrl: String,
+    /** Sent as User-Agent so the Mac's log shows which app/phone connected. */
+    private val userAgent: String? = null,
+) {
 
     /** Throws [IOException] unless [baseUrl] answers as a pic-sync server. */
     fun checkServer() {
@@ -73,7 +77,9 @@ class ServerClient(private val baseUrl: String) {
         }
     }
 
-    private fun open(path: String) = URL(baseUrl + path).openConnection() as HttpURLConnection
+    private fun open(path: String) = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
+        userAgent?.let { setRequestProperty("User-Agent", it) }
+    }
 
     private fun HttpURLConnection.readBody(code: Int): String? =
         (if (code in 200..299) inputStream else errorStream)?.bufferedReader()?.use { it.readText() }

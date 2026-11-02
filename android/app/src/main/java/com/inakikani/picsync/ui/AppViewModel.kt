@@ -7,6 +7,7 @@ import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
@@ -14,15 +15,18 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.inakikani.picsync.data.Album
+import com.inakikani.picsync.data.AppLog
 import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
 import com.inakikani.picsync.data.MediaRepository
+import com.inakikani.picsync.data.Opened
 import com.inakikani.picsync.data.ServerClient
 import com.inakikani.picsync.data.Settings
 import com.inakikani.picsync.data.UploadRecord
 import com.inakikani.picsync.data.UploadResult
 import com.inakikani.picsync.data.UploadStore
 import com.inakikani.picsync.data.changedSinceUpload
+import com.inakikani.picsync.data.explain
 import com.inakikani.picsync.data.groupAlbums
 import com.inakikani.picsync.data.normalizeServerUrl
 import kotlinx.coroutines.CancellationException
@@ -36,6 +40,7 @@ import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.ZonedDateTime
+import java.util.Locale
 
 /** Which file is uploading. Its byte progress is in [AppViewModel.uploadFraction], not here. */
 data class UploadProgress(val index: Int, val total: Int, val currentId: Long)
@@ -88,6 +93,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val store = UploadStore(app)
     private val settings = Settings(app)
+    private val userAgent = "pic-sync-android/${appVersion(app)} (Android ${Build.VERSION.RELEASE}; ${Build.MANUFACTURER} ${Build.MODEL})"
 
     // Thumbnails are ~300-400 KB each, so the cache is bounded by bytes, not by count:
     // 1/8 of the app's heap limit, at most 48 MB. It's emptied when the app is in the background.
@@ -133,23 +139,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             _state.update { it.copy(connecting = true, connectError = null) }
+            AppLog.i("connect: trying $url")
             try {
-                withContext(Dispatchers.IO) { ServerClient(url).checkServer() }
+                withContext(Dispatchers.IO) { ServerClient(url, userAgent).checkServer() }
                 settings.serverUrl = url
+                AppLog.i("connect: ok, $url is a pic-sync server")
                 _state.update { it.copy(serverUrl = url, connecting = false) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                AppLog.w("connect: failed for $url", e)
                 _state.update {
-                    it.copy(connecting = false, connectError = "Couldn't connect to $url: ${e.describe()}")
+                    it.copy(connecting = false, connectError = "Couldn't connect to $url: ${e.explain()}")
                 }
             }
         }
     }
 
-    fun setConnectError(msg: String) = _state.update { it.copy(connectError = msg) }
+    fun setConnectError(msg: String) {
+        AppLog.w("connect: $msg")
+        _state.update { it.copy(connectError = msg) }
+    }
 
     fun disconnect() {
+        AppLog.i("disconnect from ${_state.value.serverUrl}")
         uploadJob?.cancel()
         settings.serverUrl = null
         _state.update { it.copy(serverUrl = null, connectError = null) }
@@ -159,7 +172,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshMedia() {
         viewModelScope.launch {
-            val (media, records) = withContext(Dispatchers.IO) { repo.query() to store.all() }
+            val started = System.nanoTime()
+            val (media, records) = try {
+                withContext(Dispatchers.IO) { repo.query() to store.all() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.e("media: reading the photo library failed", e)
+                showMessage("Couldn't read photos: ${e.explain()}")
+                return@launch
+            }
+            AppLog.i(
+                "media: ${media.size} items (${media.count { it.isVideo }} videos) in " +
+                    "${media.mapTo(HashSet()) { it.albumId }.size} albums, ${records.size} upload records, " +
+                    "${_state.value.excluded.size} skipped, read in ${ms(started)} ms",
+            )
             val ids = media.mapTo(HashSet()) { it.id }
             val albumIds = media.mapTo(HashSet()) { it.albumId }
             _state.update { s ->
@@ -185,7 +212,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggle(id: Long) = _state.update {
         if (it.upload != null || id in it.excluded) it
-        else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id)
+        else if (id in it.selected) it.copy(selected = it.selected - id)
+        // Selecting a photo that failed also shows why it failed.
+        else it.copy(selected = it.selected + id, message = it.failed[id] ?: it.message)
     }
 
     /** Long-press: mark/unmark a file to skip. Excluded files drop out of the selection. */
@@ -196,6 +225,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else it.copy(excluded = it.excluded + id, selected = it.selected - id)
         }
         settings.excluded = s.excluded
+        AppLog.d("skip ${if (id in s.excluded) "on" else "off"} for id $id (${s.excluded.size} skipped)")
     }
 
     fun selectNotUploaded() = _state.update { s -> s.copy(selected = s.notUploaded.mapTo(HashSet()) { it.id }) }
@@ -215,8 +245,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val items = s.media.filter { it.id in s.selected }
         if (items.isEmpty()) return
 
+        AppLog.i("upload: ${items.size} files, ${mb(items.sumOf { it.size })} to $url")
         uploadJob = viewModelScope.launch {
-            val client = ServerClient(url)
+            val client = ServerClient(url, userAgent)
+            val batchStart = System.nanoTime()
             var ok = 0
             var dup = 0
             var failed = 0
@@ -227,9 +259,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     lastReported = -1f
                     _uploadFraction.value = 0f
                     _state.update { it.copy(upload = UploadProgress(i, items.size, item.id)) }
+                    val fileStart = System.nanoTime()
                     try {
-                        val result = uploadOne(client, item) { sent -> reportProgress(item, sent) }
+                        val (result, opened) = uploadOne(client, item) { sent -> reportProgress(item, sent) }
+                        val took = ms(fileStart)
+                        val where = "${item.name} (id ${item.id}, ${mb(result.local.bytes)}, ${took} ms" +
+                            "${speed(result.local.bytes, took)})"
+                        val location = if (opened.withLocation) "location kept" else "WITHOUT location: ${opened.whyNoLocation}"
                         if (result.verified) {
+                            AppLog.i(
+                                "upload: $where " +
+                                    (if (result.saved.duplicate) "already on Mac as ${result.saved.name}" else "saved as ${result.saved.name}") +
+                                    ", verified, $location",
+                            )
                             val rec = UploadRecord(
                                 mediaId = item.id,
                                 snapshot = item.snapshot,
@@ -249,6 +291,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                             }
                         } else {
+                            AppLog.e(
+                                "upload: $where NOT verified: sent ${result.local.bytes} bytes sha256 ${result.local.sha256}, " +
+                                    "Mac reported ${result.saved.size} bytes sha256 ${result.saved.sha256}",
+                            )
                             failed++
                             val msg = "${item.name}: the Mac didn't receive identical bytes"
                             firstError = firstError ?: msg
@@ -257,8 +303,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
+                        AppLog.w("upload: ${item.name} (id ${item.id}) failed after ${ms(fileStart)} ms", e)
                         failed++
-                        val msg = "${item.name}: ${e.describe()}"
+                        val msg = "${item.name}: ${e.explain()}"
                         firstError = firstError ?: msg
                         _state.update { it.copy(failed = it.failed + (item.id to msg)) }
                     }
@@ -274,21 +321,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val summary = (if (cancelled) "Cancelled: " else "") + parts.joinToString(", ") +
                     (firstError?.let { ". $it" } ?: "")
+                AppLog.i("upload: done in ${ms(batchStart) / 1000} s: $summary")
                 _state.update { it.copy(upload = null, message = summary) }
             }
         }
     }
 
     fun cancelUpload() {
+        AppLog.i("upload: cancelled by the user")
         uploadJob?.cancel()
     }
 
-    private suspend fun uploadOne(client: ServerClient, item: MediaItem, onProgress: (Long) -> Unit): UploadResult =
+    private suspend fun uploadOne(
+        client: ServerClient,
+        item: MediaItem,
+        onProgress: (Long) -> Unit,
+    ): Pair<UploadResult, Opened> =
         withContext(Dispatchers.IO) {
             val ctx = coroutineContext
-            repo.open(item).use {
+            val opened = repo.open(item)
+            val result = opened.stream.use {
                 client.upload(it, item.name, item.mimeType, item.takenAt, onProgress, checkCancelled = { ctx.ensureActive() })
             }
+            result to opened
         }
 
     private fun reportProgress(item: MediaItem, sent: Long) {
@@ -326,14 +381,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         uris += item.uri
                         continue
                     }
-                    val now = runCatching { repo.hash(item) }.getOrNull()
+                    val now = try {
+                        repo.hash(item)
+                    } catch (e: Exception) {
+                        AppLog.w("trash: re-hashing ${item.name} (id ${item.id}) failed, skipping it", e)
+                        null
+                    }
                     if (now != null && now.bytes == rec.bytes && now.sha256 == rec.sha256) {
                         store.put(rec.copy(snapshot = item.snapshot)) // same bytes, just new metadata
                         uris += item.uri
                     } else {
-                        skipped++ // edited after upload: the Mac doesn't have this version
+                        // Edited after upload (the Mac doesn't have this version), or read with a
+                        // different location setting than when it was uploaded.
+                        if (now != null) AppLog.i("trash: skipping ${item.name} (id ${item.id}): bytes differ from the upload")
+                        skipped++
                     }
                 }
+                AppLog.i("trash: ${uris.size} to move, $skipped skipped, ${excluded.size} protected by skip, scope '${scope.scopeLabel.trim()}'")
                 uris to skipped
             }
             pendingTrash = uris.size
@@ -346,12 +410,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 return null
             }
             return MediaStore.createTrashRequest(resolver, uris, true).intentSender
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.e("trash: preparing the request failed", e)
+            showMessage("Couldn't prepare the trash request: ${e.explain()}")
+            return null
         } finally {
             _state.update { it.copy(busy = null) }
         }
     }
 
     fun onTrashResult(ok: Boolean) {
+        AppLog.i(if (ok) "trash: moved $pendingTrash item(s) to trash" else "trash: cancelled or refused by the user/system")
         showMessage(
             if (ok) {
                 "Moved $pendingTrash item(s)$pendingScope" +
@@ -371,4 +442,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-private fun Throwable.describe(): String = message?.takeIf { it.isNotBlank() } ?: javaClass.simpleName
+private fun ms(sinceNanos: Long): Long = (System.nanoTime() - sinceNanos) / 1_000_000
+
+private fun mb(bytes: Long): String = "%.1f MB".format(Locale.ROOT, bytes / 1e6)
+
+private fun speed(bytes: Long, millis: Long): String =
+    if (millis <= 0) "" else ", %.1f MB/s".format(Locale.ROOT, bytes / 1e3 / millis)

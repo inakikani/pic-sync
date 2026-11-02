@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -28,12 +29,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.inakikani.picsync.data.AppLog
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 @Composable
 fun ConnectScreen(vm: AppViewModel, state: UiState) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var manual by rememberSaveable { mutableStateOf("") }
     var networkDenied by remember { mutableStateOf(false) }
     val gate = rememberLocalNetworkGate { networkDenied = true }
@@ -74,7 +77,10 @@ fun ConnectScreen(vm: AppViewModel, state: UiState) {
             ) { Text("Connect") }
 
             if (state.connecting) CircularProgressIndicator()
-            state.connectError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.connectError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { shareDiagnosticsAsync(ctx, scope, state) }) { Text("Share diagnostics") }
+            }
             if (networkDenied) {
                 Text(
                     "pic-sync needs permission to reach devices on your local network (\"Nearby devices\") " +
@@ -98,6 +104,7 @@ private fun scanQr(ctx: Context, onResult: (String) -> Unit, onError: (String) -
             if (text.isNullOrBlank()) onError("That QR code has no address in it") else onResult(text)
         }
         .addOnFailureListener { e ->
+            AppLog.w("QR scanner failed", e)
             onError("Couldn't start the QR scanner (${e.message}). Enter the address instead.")
         }
 }

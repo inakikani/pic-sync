@@ -55,6 +55,10 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.inakikani.picsync.data.AppLog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -83,13 +87,16 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
 
     // Media permission
     var access by remember { mutableStateOf(mediaAccess(ctx)) }
-    val mediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    val mediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         access = mediaAccess(ctx)
+        AppLog.i("permissions: asked ${result.keys.map { it.substringAfterLast('.') }} -> $result; photo access now $access")
         vm.refreshMedia()
     }
     // Installs from before location support already have media access: ask only for location,
     // so a limited-access user isn't shown the photo selection again.
-    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        AppLog.i("permissions: media location ${if (granted) "granted" else "denied (uploads will have no GPS location)"}")
+    }
     LaunchedEffect(Unit) {
         when {
             access == MediaAccess.NONE -> mediaLauncher.launch(mediaPermissions())
@@ -127,6 +134,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
     }
     var confirmTrash by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showFailures by remember { mutableStateOf(false) }
     fun runTrash() {
         scope.launch {
             vm.prepareTrash()?.let { trashLauncher.launch(IntentSenderRequest.Builder(it).build()) }
@@ -154,6 +162,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
                 onUpload = { networkGate { vm.uploadSelected() } },
                 onCancel = vm::cancelUpload,
                 onTrash = { if (vm.canManageMedia()) { confirmTrash = true } else { runTrash() } },
+                onShowFailures = { showFailures = true },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -187,6 +196,26 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         )
     }
 
+    if (showFailures) {
+        AlertDialog(
+            onDismissRequest = { showFailures = false },
+            title = { Text("Failed uploads") },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.failed.values.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    Text(
+                        "Select them (tap) and press Upload to retry. More detail: Settings → Share diagnostics.",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFailures = false }) { Text("Close") } },
+        )
+    }
+
     if (showSettings) {
         val canManage = vm.canManageMedia()
         AlertDialog(
@@ -208,6 +237,13 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
                         },
                     )
                     TextButton(onClick = { openManageMediaSettings(ctx) }) { Text("Open Media management") }
+                    Spacer(Modifier.size(8.dp))
+                    Text("Troubleshooting", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Sends the app's recent log, versions and permissions (file names and the " +
+                            "server address included, no photos) to an app of your choice.",
+                    )
+                    TextButton(onClick = { shareDiagnosticsAsync(ctx, scope, state) }) { Text("Share diagnostics") }
                 }
             },
             confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Done") } },
@@ -388,6 +424,7 @@ private fun ActionBar(
     onUpload: () -> Unit,
     onCancel: () -> Unit,
     onTrash: () -> Unit,
+    onShowFailures: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Column(
@@ -403,7 +440,7 @@ private fun ActionBar(
                 )
                 OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
             } else {
-                IdleActions(state, onSelectNotUploaded, onClear, onUpload, onTrash)
+                IdleActions(state, onSelectNotUploaded, onClear, onUpload, onTrash, onShowFailures)
             }
         }
     }
@@ -416,8 +453,14 @@ private fun IdleActions(
     onClear: () -> Unit,
     onUpload: () -> Unit,
     onTrash: () -> Unit,
+    onShowFailures: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (state.failed.isNotEmpty()) {
+            TextButton(onClick = onShowFailures, modifier = Modifier.fillMaxWidth()) {
+                Text("${state.failed.size} failed to upload · see why", color = MaterialTheme.colorScheme.error)
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.selected.isEmpty()) {
                 OutlinedButton(

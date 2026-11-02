@@ -1,0 +1,117 @@
+# Logging and troubleshooting
+
+## Where the logs are
+
+| Where | Log |
+|-------|-----|
+| Mac app | `~/Library/Logs/pic-sync.log`. Open it from the menu bar with **Open log**, which opens Console. |
+| Command line | Printed in the terminal. To also write a file, add `"log_file": "~/Library/Logs/pic-sync.log"` to `config.json`. |
+| Android app | Logcat (tag `pic-sync`) in Android Studio, and a file inside the app. Use **Settings → Share diagnostics** (also offered on the connect screen after an error) to send it. |
+
+- **Mac log size:** the file is capped at 5 MB. When it's full it's renamed to `pic-sync.log.1` and a new one starts, so at most two files exist.
+- **Mac log detail:** start with `-debug` for more, which also logs requests for the Mac's own QR page. For the app: `pic-sync.app/Contents/MacOS/pic-sync -debug`.
+- **Android log size:** 256 KB plus one previous file. It survives restarts and records crashes.
+
+## What the Mac logs
+
+One line per event, as `key=value` fields. Levels are `INFO`, `WARN` (a problem caused by the phone or the network) and `ERROR` (a problem on the Mac).
+
+```
+time=2026-11-02T14:00:01.204 level=INFO msg="==== pic-sync starting ====" version="964d020 (2026-11-02)" go=go1.27.3 os=darwin/arm64 macos=26.1 pid=4242 log=/Users/me/Library/Logs/pic-sync.log mode=app ui="menu bar" config=… folder=/Users/me/Pictures/phone-dump
+time=2026-11-02T14:00:01.210 level=INFO msg="address for the phone" url=http://192.168.1.23:8080
+time=2026-11-02T14:00:01.210 level=INFO msg=listening addr=[::]:8080 qr_url=http://192.168.1.23:8080
+time=2026-11-02T14:02:10.551 level=INFO msg=request client=192.168.1.40 method=GET path=/api/info status=200 took=1ms agent="pic-sync-android/1.0 (1) (Android 17; Google Pixel 9)"
+time=2026-11-02T14:02:14.902 level=INFO msg=saved file=IMG_1234.jpg size="3.2 MB" took=1.1s speed="2.9 MB/s" client=192.168.1.40 sha256=2cf24dba5fb0 date="2024-07-14 18:30" date_from="file metadata"
+time=2026-11-02T14:02:14.903 level=INFO msg=request client=192.168.1.40 method=POST path=/upload status=200 took=1.1s received="3.2 MB" agent=…
+time=2026-11-02T14:02:20.117 level=INFO msg="duplicate, not stored (identical file already in the folder)" file=IMG_1234.jpg sent_as=IMG_1234(1).jpg …
+time=2026-11-02T14:03:41.006 level=WARN msg="upload failed" file=VID_0042.mp4 client=192.168.1.40 took=20s err="upload interrupted after 48.1 MB: unexpected EOF"
+time=2026-11-02T14:05:00.000 level=ERROR msg="upload failed" file=IMG_2000.jpg … err="writing file: write …: no space left on device"
+```
+
+| Message | Meaning |
+|---------|---------|
+| `pic-sync starting` | What is running: commit, macOS, mode, config file, upload folder. Every run starts with this line. |
+| `address for the phone` / `listening` | Every LAN address, and the one put in the QR code. |
+| `request` | Every HTTP request: phone IP, path, status, size received, time and user agent. The agent tells you whether it was the Android app (`pic-sync-android/…`) or a browser. |
+| `saved` | A stored file: the name on disk, `sent_as` if it was renamed to avoid overwriting, size, speed, the first 12 hex digits of its SHA-256, and where its date came from (`file metadata`, `phone`, or `none`). |
+| `duplicate, not stored` | Identical content was already in the folder under `file`. Nothing new was written. |
+| `upload failed` (WARN, status 400) | The request was bad or the connection broke mid-file. Nothing is saved, and no partial file is left behind. |
+| `upload failed` (ERROR, status 500) | The Mac couldn't write the file: folder missing or not writable, disk full. The Android app shows *the Mac couldn't save it: …* |
+| `upload folder changed`, `saving config`, `QR window unavailable…`, `stopped by user` | Mac app events. |
+
+## What the Android app logs
+
+```
+2026-11-02 14:02:09.870 I ==== app start: app 1.0 (1), Android 17 (SDK 37), Google Pixel 9; permissions: photos=FULL, location=yes, local network=yes, media management=no
+2026-11-02 14:02:10.540 I connect: ok, http://192.168.1.23:8080 is a pic-sync server
+2026-11-02 14:02:11.020 I media: 8312 items (412 videos) in 23 albums, 5120 upload records, 3 skipped, read in 480 ms
+2026-11-02 14:02:12.001 I upload: 25 files, 81.0 MB to http://192.168.1.23:8080
+2026-11-02 14:02:14.905 I upload: IMG_1234.jpg (id 1000123, 3.2 MB, 1104 ms, 2.9 MB/s) saved as IMG_1234.jpg, verified, location kept
+2026-11-02 14:03:41.010 W upload: VID_0042.mp4 (id 1000456) failed after 20011 ms | java.net.SocketException: Connection reset
+2026-11-02 14:05:30.000 I trash: 24 to move, 1 skipped, 3 protected by skip, scope 'from Camera'
+```
+
+The app logs:
+- **At start:** app and Android version, the phone model and every permission that matters.
+- **Connecting:** each attempt and why it failed.
+- **The photo library:** what was read.
+- **Each upload:** size, time, speed, the name on the Mac, whether it was verified, and whether GPS location was kept or why not. On a verification failure it logs both hashes.
+- **Moving to trash:** what was moved, skipped or protected.
+- **Other:** permission answers, thumbnail failures (the first few), QR scanner errors and crashes.
+
+Errors also have a stack trace in the file.
+
+On the phone:
+- A photo that failed shows **!**. Tap it to see why, or tap **N failed to upload · see why** above the buttons for the full list.
+- **Share diagnostics** sends the environment line, server address, library counts, this session's failures and the recent log as plain text. It includes file names and the server address, but no photos.
+
+## Common problems
+
+**The phone can't open the page or connect** (it times out or *can't reach the Mac*)
+1. Check the Mac log for `request` lines from the phone's IP. If there are none, the phone never reached the Mac:
+   - **Wi-Fi:** the phone and the Mac must be on the same network. Guest networks and some mesh or "client isolation" setups keep devices apart. A VPN on either device can also get in the way.
+   - **Address:** check you're using the address from the `address for the phone` lines. If the Mac has several (Wi-Fi + Ethernet, VPN), the QR code uses the default route's address and may not be the one the phone can reach. Type another one by hand.
+   - **macOS firewall:** System Settings → Network → Firewall must allow incoming connections for pic-sync. The prompt appears on first run, and choosing *Deny* blocks the phone.
+   - **Local network privacy:** if macOS asked whether pic-sync may access the local network and you declined, allow it in System Settings → Privacy & Security → Local Network.
+2. **Android app, *blocked by Android: allow Nearby devices*:** on Android 17 the app needs the local network permission. Turn it on in Settings → Apps → pic-sync → Permissions → Nearby devices.
+3. ***connection refused*:** pic-sync isn't running, or it's listening on a different port (see `listening addr=`).
+4. ***listening on :8080 (is another pic-sync already running?)*:** quit the other instance, or set another `listen` port.
+
+**Uploads stop halfway** (`upload interrupted` in the Mac log, *connection dropped* on the phone)
+- The phone locked or switched networks, or the browser went to the background. The Android app keeps the screen on while uploading; in a browser, keep the page open and the screen on.
+- Nothing partial is saved. Upload the same files again: files that did arrive are reported as *already on Mac*.
+
+**ERROR `upload failed` / *the Mac couldn't save it***
+- **Folder removed or disk ejected:** choose the folder again (menu bar → **Change folder…**, or fix `upload_dir`).
+- **Disk full:** free space. The error says `no space left on device`.
+- **Permission denied:** the folder isn't writable. For folders in Desktop, Documents or Downloads, macOS may also need to allow pic-sync access (System Settings → Privacy & Security → Files and Folders).
+
+**The Mac didn't receive identical bytes** (Android, `NOT verified` in the app log)
+- What arrived differs from what the phone sent. This is rare and points to a network or proxy problem. The photo isn't recorded as uploaded and won't be offered for trash. Retry it, and if it keeps happening, compare the two hashes in the app log with the Mac's `saved` line.
+
+**A photo isn't recognised as a duplicate**
+- Duplicates are matched by identical content only. An edited copy, a different export or HEIC→JPEG conversion counts as a new file.
+- Photos uploaded from the Android app before location support were stored without GPS. Re-uploading them now sends different bytes, so they're saved again as `name (1).jpg`.
+
+**Dates in Finder are wrong**
+- Check `date_from` in the `saved` line:
+  - **`file metadata`:** the date inside the photo or video.
+  - **`phone (no date in file)`:** the date the phone or browser sent (e.g. for screenshots).
+  - **`none`:** the upload time was kept.
+- Photo times without a time zone in their metadata are read as the Mac's local time.
+- Fix files that are already on the Mac: `pic-sync -fix-dates <folder> -dry-run`, then run it again without `-dry-run`.
+
+**GPS location is missing**
+- **Android app:** look for `WITHOUT location: …` in the app log. The usual cause is that *media location* wasn't granted (Settings → Apps → pic-sync → Permissions), or that only limited ("selected photos") access was given.
+- **Browsers:** they may remove location before sending, and the Mac can't add it back. Use the Android app.
+
+**iPhone: tapping *Add* in the photo picker does nothing, or photos arrive as JPEG**
+- Update pic-sync: the page accepts HEIC/HEIF so iOS can send originals. If it still fails, check whether a `request` line with `path=/upload` appears at all.
+
+**The Mac app doesn't start or shows no menu bar icon**
+- **macOS refuses to open it:** right-click → **Open** once, or run `xattr -cr pic-sync.app`.
+- **No icon, but a "pic-sync is running" window:** the app was built without the menu bar (cross-compiled, not with `make app` on a Mac). The startup line shows `ui="window (built without the menu bar)"`.
+- **Nothing visible at all:** check `~/Library/Logs/pic-sync.log` for the startup line and errors, or run `pic-sync.app/Contents/MacOS/pic-sync` in Terminal to see the log live.
+
+**Android app crashes**
+- The crash and its stack trace are in the app log. After reopening the app, use **Share diagnostics**, or check Logcat in Android Studio.

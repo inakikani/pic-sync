@@ -35,6 +35,12 @@ data class MediaItem(
         )
 }
 
+/**
+ * An opened media file. [withLocation] is false when Android stripped the GPS
+ * location (see [MediaRepository.open]); [whyNoLocation] says why.
+ */
+class Opened(val stream: InputStream, val withLocation: Boolean, val whyNoLocation: String?)
+
 /** Reads photos/videos from MediaStore. Blocking: call from a background thread. */
 class MediaRepository(
     private val resolver: ContentResolver,
@@ -99,8 +105,17 @@ class MediaRepository(
         return items
     }
 
+    private var thumbFailures = 0
+
     fun thumbnail(item: MediaItem, px: Int = 320): Bitmap? =
-        runCatching { resolver.loadThumbnail(item.uri, Size(px, px), null) }.getOrNull()
+        try {
+            resolver.loadThumbnail(item.uri, Size(px, px), null)
+        } catch (e: Exception) {
+            // Common for corrupt or unusual files; log the first few, then every 100th.
+            val n = ++thumbFailures
+            if (n <= 5 || n % 100 == 0) AppLog.w("thumbnail failed for ${item.name} (id ${item.id}, failure #$n)", e)
+            null
+        }
 
     /**
      * Opens the item's bytes for uploading or hashing. Without [MediaStore.setRequireOriginal]
@@ -109,18 +124,23 @@ class MediaRepository(
      * isn't granted (or the original can't be opened) the redacted bytes are used.
      * Uploading and re-hashing both go through here, so they always see the same bytes.
      */
-    fun open(item: MediaItem): InputStream {
+    fun open(item: MediaItem): Opened {
+        var why = "media location permission not granted"
         if (canReadLocation()) {
             try {
-                resolver.openInputStream(MediaStore.setRequireOriginal(item.uri))?.let { return it }
+                resolver.openInputStream(MediaStore.setRequireOriginal(item.uri))?.let { return Opened(it, true, null) }
+                why = "original not available"
             } catch (e: SecurityException) { // e.g. limited (selected photos) access
+                why = "original refused: ${e.message}"
             } catch (e: UnsupportedOperationException) {
+                why = "original unsupported: ${e.message}"
             }
         }
-        return resolver.openInputStream(item.uri) ?: throw IOException("Can't open ${item.name}")
+        val stream = resolver.openInputStream(item.uri) ?: throw IOException("Can't open ${item.name}")
+        return Opened(stream, false, why)
     }
 
     /** Re-reads the item's bytes and hashes them. */
     fun hash(item: MediaItem, checkCancelled: () -> Unit = {}): HashResult =
-        open(item).use { hashStream(it, checkCancelled) }
+        open(item).stream.use { hashStream(it, checkCancelled) }
 }
