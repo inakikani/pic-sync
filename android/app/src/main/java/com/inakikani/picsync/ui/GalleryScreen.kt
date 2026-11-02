@@ -4,10 +4,11 @@ import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -308,8 +310,10 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                         uploaded = item.id in state.records,
                         failed = item.id in state.failed,
                         selected = item.id in state.selected,
+                        excluded = item.id in state.excluded,
                         progress = up?.takeIf { it.currentId == item.id }?.fraction,
                         onClick = { vm.toggle(item.id) },
+                        onLongClick = { vm.toggleExcluded(item.id) },
                     )
                 }
             }
@@ -424,6 +428,7 @@ private fun IdleActions(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaCell(
     item: MediaItem,
@@ -431,8 +436,10 @@ private fun MediaCell(
     uploaded: Boolean,
     failed: Boolean,
     selected: Boolean,
+    excluded: Boolean,
     progress: Float?,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     val thumb by produceState<ImageBitmap?>(null, item.id) { value = loadThumbnail(item) }
     val shape = RoundedCornerShape(4.dp)
@@ -443,15 +450,21 @@ private fun MediaCell(
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         thumb?.let {
-            Image(it, contentDescription = item.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            Image(
+                it,
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().then(if (excluded) Modifier.alpha(0.4f) else Modifier),
+            )
         }
         if (item.isVideo) {
             Text("▶", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(4.dp))
         }
         when {
+            excluded -> Badge("⊘", MaterialTheme.colorScheme.error)
             progress != null -> Badge("${(progress * 100).toInt()}%", MaterialTheme.colorScheme.primary)
             uploaded -> Badge("✓", Color(0xFF16A34A))
             failed -> Badge("!", MaterialTheme.colorScheme.error)

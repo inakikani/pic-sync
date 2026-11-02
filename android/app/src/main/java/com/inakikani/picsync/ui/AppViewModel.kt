@@ -50,6 +50,7 @@ data class UiState(
     val records: Map<Long, UploadRecord> = emptyMap(), // verified uploads, by MediaStore id
     val failed: Map<Long, String> = emptyMap(),        // this session's failures
     val selected: Set<Long> = emptySet(),
+    val excluded: Set<Long> = emptySet(),     // long-pressed to skip; never uploaded
     val onlyNotUploaded: Boolean = false,
     val selectedAlbum: Long? = null, // null = all photos
     val filters: MediaFilters = MediaFilters(),
@@ -133,6 +134,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     records = records,
                     mediaLoaded = true,
                     selected = s.selected intersect ids,
+                    excluded = s.excluded intersect ids,
                     // e.g. the album was emptied by moving everything to trash
                     selectedAlbum = s.selectedAlbum?.takeIf { it in albumIds },
                 )
@@ -147,11 +149,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggle(id: Long) = _state.update {
-        if (it.upload != null) it
+        if (it.upload != null || id in it.excluded) it
         else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id)
     }
 
-    fun selectNotUploaded() = _state.update { s -> s.copy(selected = s.notUploaded.mapTo(HashSet()) { it.id }) }
+    /** Long-press: mark/unmark a file to skip. Excluded files drop out of the selection. */
+    fun toggleExcluded(id: Long) = _state.update {
+        if (it.upload != null) it
+        else if (id in it.excluded) it.copy(excluded = it.excluded - id)
+        else it.copy(excluded = it.excluded + id, selected = it.selected - id)
+    }
+
+    fun selectNotUploaded() = _state.update { s ->
+        s.copy(selected = s.notUploaded.mapNotNullTo(HashSet()) { it.id.takeIf { id -> id !in s.excluded } })
+    }
     fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
     fun setOnlyNotUploaded(only: Boolean) = _state.update { it.copy(onlyNotUploaded = only) }
     fun selectAlbum(id: Long?) = _state.update { it.copy(selectedAlbum = id) }
