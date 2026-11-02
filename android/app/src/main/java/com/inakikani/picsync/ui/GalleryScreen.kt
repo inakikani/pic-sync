@@ -394,10 +394,14 @@ private fun MediaGrid(vm: AppViewModel, state: UiState, access: MediaAccess, onC
                                 span = { GridItemSpan(maxLineSpan) },
                                 contentType = "month",
                             ) {
+                                val pending = group.items.filter { it.id !in state.records && it.id !in state.excluded }
                                 MonthHeader(
                                     group.month,
                                     total = group.items.size,
-                                    pending = group.items.count { it.id !in state.records && it.id !in state.excluded },
+                                    pending = pending.size,
+                                    allSelected = pending.isNotEmpty() && pending.all { it.id in state.selected },
+                                    enabled = state.upload == null,
+                                    onToggle = { vm.toggleMonth(group.items) },
                                 )
                             }
                             items(group.items, key = { it.id }, contentType = { "photo" }) { item ->
@@ -459,18 +463,37 @@ private class MonthIndex(val groups: List<MonthGroup<MediaItem>>) {
     }
 }
 
+/**
+ * "November 2026 · 132 · 20 to upload  [Select 20]". The button selects the month's
+ * photos that still need uploading (not uploaded, not skipped), so a whole month
+ * can be uploaded with one more tap on Upload; tapped again it deselects them.
+ */
 @Composable
-private fun MonthHeader(month: YearMonth, total: Int, pending: Int) {
+private fun MonthHeader(
+    month: YearMonth,
+    total: Int,
+    pending: Int,
+    allSelected: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 14.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.Bottom,
+        Modifier.fillMaxWidth().padding(start = 6.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(monthLabel(month), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        Text(
-            if (pending > 0) "$total · $pending to upload" else "$total · all uploaded",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+            Text(monthLabel(month), style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (pending > 0) "$total · $pending to upload" else "$total · all uploaded",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (pending > 0) {
+            TextButton(onClick = onToggle, enabled = enabled) {
+                Text(if (allSelected) "Deselect" else "Select $pending")
+            }
+        }
     }
 }
 

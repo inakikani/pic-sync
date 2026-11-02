@@ -35,3 +35,26 @@ class MonthsTest {
         assertEquals("Nov 2026", shortMonthLabel(YearMonth.of(2026, 11), Locale.ENGLISH))
     }
 }
+
+class MonthSelectionTest {
+    private val uploaded = setOf(2L)
+    private val skipped = setOf(3L)
+    private val pending: (Long) -> Boolean = { it !in uploaded && it !in skipped }
+    private val month = listOf(1L, 2L, 3L, 4L)
+
+    @Test fun selectsOnlyWhatStillNeedsUploading() {
+        assertEquals(setOf(9L, 1L, 4L), toggleMonthSelection(setOf(9L), month, pending))
+    }
+
+    @Test fun secondTapDeselectsTheMonthButKeepsOthers() {
+        assertEquals(setOf(9L), toggleMonthSelection(setOf(9L, 1L, 4L), month, pending))
+    }
+
+    @Test fun partlySelectedMonthGetsCompleted() {
+        assertEquals(setOf(1L, 4L), toggleMonthSelection(setOf(1L), month, pending))
+    }
+
+    @Test fun nothingToUploadChangesNothing() {
+        assertEquals(setOf(9L), toggleMonthSelection(setOf(9L), listOf(2L, 3L), pending))
+    }
+}

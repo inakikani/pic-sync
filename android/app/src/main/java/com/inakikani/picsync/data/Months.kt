@@ -42,3 +42,17 @@ fun monthLabel(month: YearMonth, locale: Locale = Locale.getDefault()): String {
 /** Short form for the scroll label: "Nov 2026". */
 fun shortMonthLabel(month: YearMonth, locale: Locale = Locale.getDefault()): String =
     month.format(DateTimeFormatter.ofPattern("LLL yyyy", locale))
+
+/**
+ * Tapping a month header: selects the month's items that still need uploading
+ * ([pending]), or deselects them if they're all selected already. Other
+ * selected items are kept.
+ */
+fun toggleMonthSelection(selected: Set<Long>, monthIds: List<Long>, pending: (Long) -> Boolean): Set<Long> {
+    val ids = monthIds.filterTo(HashSet(), pending)
+    return when {
+        ids.isEmpty() -> selected
+        selected.containsAll(ids) -> selected - ids
+        else -> selected + ids
+    }
+}

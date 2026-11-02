@@ -29,6 +29,7 @@ import com.inakikani.picsync.data.changedSinceUpload
 import com.inakikani.picsync.data.explain
 import com.inakikani.picsync.data.groupAlbums
 import com.inakikani.picsync.data.normalizeServerUrl
+import com.inakikani.picsync.data.toggleMonthSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -236,6 +237,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectNotUploaded() = _state.update { s -> s.copy(selected = s.notUploaded.mapTo(HashSet()) { it.id }) }
     fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
+
+    /** Month header tap: select that month's photos still to upload, or deselect them. */
+    fun toggleMonth(items: List<MediaItem>) = _state.update { s ->
+        if (s.upload != null) s
+        else s.copy(
+            selected = toggleMonthSelection(s.selected, items.map { it.id }) { id -> id !in s.records && id !in s.excluded },
+        )
+    }
     fun setOnlyNotUploaded(only: Boolean) = _state.update { it.copy(onlyNotUploaded = only) }
     fun selectAlbum(id: Long?) = _state.update { it.copy(selectedAlbum = id) }
     fun setFilters(filters: MediaFilters) = _state.update { it.copy(filters = filters) }
