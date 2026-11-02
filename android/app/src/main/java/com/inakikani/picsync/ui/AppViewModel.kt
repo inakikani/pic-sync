@@ -28,6 +28,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -50,7 +51,7 @@ data class UiState(
     val records: Map<Long, UploadRecord> = emptyMap(), // verified uploads, by MediaStore id
     val failed: Map<Long, String> = emptyMap(),        // this session's failures
     val selected: Set<Long> = emptySet(),
-    val excluded: Set<Long> = emptySet(),     // long-pressed to skip; never uploaded
+    val excluded: Set<Long> = emptySet(),     // long-pressed to skip: never uploaded or trashed (persisted)
     val onlyNotUploaded: Boolean = false,
     val selectedAlbum: Long? = null, // null = all photos
     val filters: MediaFilters = MediaFilters(),
@@ -59,14 +60,17 @@ data class UiState(
     val message: String? = null,
 ) {
     val albums: List<Album> by lazy {
-        groupAlbums(media, { it.albumId }, { it.albumName }, { it.id in records })
+        // Skipped files don't count as pending.
+        groupAlbums(media, { it.albumId }, { it.albumName }, { it.id in records || it.id in excluded })
     }
     val albumName: String? get() = selectedAlbum?.let { id -> albums.firstOrNull { it.id == id }?.name }
 
     // Everything below is scoped to the selected album (or all photos) and the filters.
     val inScope: List<MediaItem> by lazy { media.filter(scopeMatcher(selectedAlbum, filters)) }
-    val notUploaded: List<MediaItem> by lazy { inScope.filter { it.id !in records } }
-    val uploadedOnPhone: Int by lazy { inScope.count { it.id in records } }
+    // Skipped (long-pressed) files aren't pending, so they're left out of counts and "Select not uploaded".
+    val notUploaded: List<MediaItem> by lazy { inScope.filter { it.id !in records && it.id !in excluded } }
+    // Long-pressed files are protected: never uploaded, never trashed.
+    val uploadedOnPhone: Int by lazy { inScope.count { it.id in records && it.id !in excluded } }
 
     /** " from Camera", " from Camera (filtered)", " (filtered)" or "" for button/dialog texts. */
     val scopeLabel: String
@@ -80,7 +84,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = Settings(app)
     private val thumbs = LruCache<Long, ImageBitmap>(400)
 
-    private val _state = MutableStateFlow(UiState(serverUrl = settings.serverUrl))
+    private val _state = MutableStateFlow(UiState(serverUrl = settings.serverUrl, excluded = settings.excluded))
     val state = _state.asStateFlow()
 
     private var uploadJob: Job? = null
@@ -134,9 +138,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     records = records,
                     mediaLoaded = true,
                     selected = s.selected intersect ids,
-                    excluded = s.excluded intersect ids,
                     // e.g. the album was emptied by moving everything to trash
                     selectedAlbum = s.selectedAlbum?.takeIf { it in albumIds },
+                    // excluded is deliberately not pruned: with limited photo access a file can
+                    // be hidden for a while, and it must still be protected when it comes back.
                 )
             }
         }
@@ -154,15 +159,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Long-press: mark/unmark a file to skip. Excluded files drop out of the selection. */
-    fun toggleExcluded(id: Long) = _state.update {
-        if (it.upload != null) it
-        else if (id in it.excluded) it.copy(excluded = it.excluded - id)
-        else it.copy(excluded = it.excluded + id, selected = it.selected - id)
+    fun toggleExcluded(id: Long) {
+        val s = _state.updateAndGet {
+            if (it.upload != null) it
+            else if (id in it.excluded) it.copy(excluded = it.excluded - id)
+            else it.copy(excluded = it.excluded + id, selected = it.selected - id)
+        }
+        settings.excluded = s.excluded
     }
 
-    fun selectNotUploaded() = _state.update { s ->
-        s.copy(selected = s.notUploaded.mapNotNullTo(HashSet()) { it.id.takeIf { id -> id !in s.excluded } })
-    }
+    fun selectNotUploaded() = _state.update { s -> s.copy(selected = s.notUploaded.mapTo(HashSet()) { it.id }) }
     fun clearSelection() = _state.update { it.copy(selected = emptySet()) }
     fun setOnlyNotUploaded(only: Boolean) = _state.update { it.copy(onlyNotUploaded = only) }
     fun selectAlbum(id: Long?) = _state.update { it.copy(selectedAlbum = id) }
@@ -274,6 +280,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun prepareTrash(): IntentSender? {
         val scope = _state.value
         val inScope = scopeMatcher(scope.selectedAlbum, scope.filters)
+        val excluded = scope.excluded
         pendingScope = scope.scopeLabel
         _state.update { it.copy(busy = "Checking files…") }
         try {
@@ -283,6 +290,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val uris = ArrayList<Uri>()
                 var skipped = 0
                 for (item in media) {
+                    if (item.id in excluded) continue // long-pressed: protected from trashing
                     val rec = records[item.id] ?: continue
                     if (!changedSinceUpload(rec.snapshot, item.snapshot)) {
                         uris += item.uri
