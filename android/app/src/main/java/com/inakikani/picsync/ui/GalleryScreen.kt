@@ -69,6 +69,11 @@ import com.inakikani.picsync.data.monthLabel
 import com.inakikani.picsync.data.shortMonthLabel
 import java.time.YearMonth
 import java.time.ZoneId
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -679,7 +684,39 @@ private fun MediaCell(
                 .background(Color.Black.copy(alpha = 0.45f))
                 .clickable(onClickLabel = "View full screen", onClick = onOpen),
             contentAlignment = Alignment.Center,
-        ) { Text("⤢", color = Color.White, style = MaterialTheme.typography.titleSmall) }
+        ) { FullScreenIcon(Modifier.size(14.dp)) }
+    }
+}
+
+/**
+ * The usual "full screen" icon: four corner brackets. Drawn rather than a text
+ * glyph (like ⤢), which sits on a font baseline and can't be centred exactly.
+ */
+@Composable
+private fun FullScreenIcon(modifier: Modifier = Modifier, color: Color = Color.White) {
+    Canvas(modifier) {
+        val stroke = 2.dp.toPx()
+        val arm = size.minDimension * 0.28f // length of each bracket arm (longer reads as a square)
+        val inset = stroke / 2 // keep the strokes inside the canvas
+        val l = inset
+        val t = inset
+        val r = size.width - inset
+        val b = size.height - inset
+        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+            drawPath(
+                Path().apply {
+                    moveTo(x + dx * arm, y)
+                    lineTo(x, y)
+                    lineTo(x, y + dy * arm)
+                },
+                color,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+        }
+        corner(l, t, 1f, 1f)
+        corner(r, t, -1f, 1f)
+        corner(l, b, 1f, -1f)
+        corner(r, b, -1f, -1f)
     }
 }
 
