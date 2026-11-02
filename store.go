@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +61,10 @@ func (s *store) SetDir(dir string) {
 	s.dirMu.Unlock()
 }
 
-func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
+// save stores one upload. clientTime is the file date the client sent (zero if
+// none); it's used as the file's modification time when the file itself has no
+// capture date (see takenTime).
+func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (savedFile, error) {
 	name, err := sanitizeName(rawName)
 	if err != nil {
 		return savedFile{}, err
@@ -102,6 +106,13 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 	if err := os.Chmod(tmpPath, 0o644); err != nil { // CreateTemp uses 0600
 		return savedFile{}, err
 	}
+	// Give the copy the original's date instead of the upload time. On macOS an
+	// older modification time also moves Finder's "Created" date back.
+	if when := fileDate(tmpPath, clientTime); !when.IsZero() {
+		if err := os.Chtimes(tmpPath, when, when); err != nil {
+			log.Printf("setting date of %s: %v", name, err) // not fatal: the bytes are intact
+		}
+	}
 	final, err := claimName(dir, name)
 	if err != nil {
 		return savedFile{}, err
@@ -116,6 +127,20 @@ func (s *store) save(rawName string, src io.Reader) (savedFile, error) {
 	}
 	res.Name = final
 	return res, nil
+}
+
+// fileDate picks the date for a saved file: the capture date recorded in the
+// file, else the client's date if plausible, else zero (keep the upload time).
+// The file's own date wins because browsers often send the time the file was
+// picked (iOS) rather than when the photo was taken.
+func fileDate(path string, clientTime time.Time) time.Time {
+	if t, ok := takenTimeOfFile(path); ok {
+		return t
+	}
+	if !clientTime.IsZero() && plausible(clientTime) {
+		return clientTime
+	}
+	return time.Time{}
 }
 
 // useCacheFor drops the hash cache when uploads move to another folder, so

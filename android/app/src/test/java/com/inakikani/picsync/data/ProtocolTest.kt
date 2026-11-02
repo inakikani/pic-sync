@@ -107,6 +107,10 @@ class ProtocolTest {
             h,
         )
         assertEquals("\r\n--B--\r\n", String(Multipart.footer("B"), Charsets.UTF_8))
+        assertEquals(
+            "--B\r\nContent-Disposition: form-data; name=\"mtime\"\r\n\r\n123\r\n",
+            String(Multipart.field("B", "mtime", "123"), Charsets.UTF_8),
+        )
         assertTrue(String(Multipart.header("B", "x", ""), Charsets.UTF_8).contains("application/octet-stream"))
     }
 

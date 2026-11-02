@@ -87,7 +87,15 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         access = mediaAccess(ctx)
         vm.refreshMedia()
     }
-    LaunchedEffect(Unit) { if (access == MediaAccess.NONE) mediaLauncher.launch(mediaPermissions()) }
+    // Installs from before location support already have media access: ask only for location,
+    // so a limited-access user isn't shown the photo selection again.
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        when {
+            access == MediaAccess.NONE -> mediaLauncher.launch(mediaPermissions())
+            !hasMediaLocation(ctx) -> locationLauncher.launch(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         access = mediaAccess(ctx)
         if (access != MediaAccess.NONE) vm.refreshMedia()

@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Size
+import java.io.IOException
+import java.io.InputStream
 
 /** A photo or video on the phone, as seen by MediaStore. */
 data class MediaItem(
@@ -34,7 +36,11 @@ data class MediaItem(
 }
 
 /** Reads photos/videos from MediaStore. Blocking: call from a background thread. */
-class MediaRepository(private val resolver: ContentResolver) {
+class MediaRepository(
+    private val resolver: ContentResolver,
+    /** Whether ACCESS_MEDIA_LOCATION is granted (checked on every open; it can change). */
+    private val canReadLocation: () -> Boolean,
+) {
 
     /** All images and videos visible to the app, newest first. Trashed and pending items are excluded. */
     fun query(): List<MediaItem> {
@@ -96,8 +102,25 @@ class MediaRepository(private val resolver: ContentResolver) {
     fun thumbnail(item: MediaItem, px: Int = 320): Bitmap? =
         runCatching { resolver.loadThumbnail(item.uri, Size(px, px), null) }.getOrNull()
 
+    /**
+     * Opens the item's bytes for uploading or hashing. Without [MediaStore.setRequireOriginal]
+     * Android strips the GPS location from photos and videos it hands to apps, so the
+     * Mac would get a copy without location. That needs ACCESS_MEDIA_LOCATION; if it
+     * isn't granted (or the original can't be opened) the redacted bytes are used.
+     * Uploading and re-hashing both go through here, so they always see the same bytes.
+     */
+    fun open(item: MediaItem): InputStream {
+        if (canReadLocation()) {
+            try {
+                resolver.openInputStream(MediaStore.setRequireOriginal(item.uri))?.let { return it }
+            } catch (e: SecurityException) { // e.g. limited (selected photos) access
+            } catch (e: UnsupportedOperationException) {
+            }
+        }
+        return resolver.openInputStream(item.uri) ?: throw IOException("Can't open ${item.name}")
+    }
+
     /** Re-reads the item's bytes and hashes them. */
     fun hash(item: MediaItem, checkCancelled: () -> Unit = {}): HashResult =
-        resolver.openInputStream(item.uri)?.use { hashStream(it, checkCancelled) }
-            ?: throw java.io.IOException("Can't open ${item.name}")
+        open(item).use { hashStream(it, checkCancelled) }
 }

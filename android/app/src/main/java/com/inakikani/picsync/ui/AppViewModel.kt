@@ -1,8 +1,10 @@
 package com.inakikani.picsync.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.IntentSender
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.provider.MediaStore
@@ -33,7 +35,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.IOException
 import java.time.ZonedDateTime
 
 /** Which file is uploading. Its byte progress is in [AppViewModel.uploadFraction], not here. */
@@ -82,7 +83,9 @@ data class UiState(
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val resolver = app.contentResolver
-    private val repo = MediaRepository(resolver)
+    private val repo = MediaRepository(resolver) {
+        app.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
     private val store = UploadStore(app)
     private val settings = Settings(app)
 
@@ -283,9 +286,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun uploadOne(client: ServerClient, item: MediaItem, onProgress: (Long) -> Unit): UploadResult =
         withContext(Dispatchers.IO) {
             val ctx = coroutineContext
-            val input = resolver.openInputStream(item.uri) ?: throw IOException("can't open file")
-            input.use {
-                client.upload(it, item.name, item.mimeType, onProgress, checkCancelled = { ctx.ensureActive() })
+            repo.open(item).use {
+                client.upload(it, item.name, item.mimeType, item.takenAt, onProgress, checkCancelled = { ctx.ensureActive() })
             }
         }
 

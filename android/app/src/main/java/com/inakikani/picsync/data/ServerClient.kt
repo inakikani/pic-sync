@@ -35,11 +35,14 @@ class ServerClient(private val baseUrl: String) {
     /**
      * Streams [input] as a multipart upload, hashing it on the way, and checks the
      * server's reported size and SHA-256 against what was actually sent.
+     * [takenAt] (millis, 0 = unknown) is sent as the file's date; the server uses it
+     * when the file itself has no capture date (e.g. screenshots).
      */
     fun upload(
         input: InputStream,
         filename: String,
         mimeType: String,
+        takenAt: Long,
         onProgress: (Long) -> Unit,
         checkCancelled: () -> Unit,
     ): UploadResult {
@@ -54,6 +57,7 @@ class ServerClient(private val baseUrl: String) {
         }
         try {
             val local = conn.outputStream.buffered(64 * 1024).use { out ->
+                if (takenAt > 0) out.write(Multipart.field(boundary, "mtime", takenAt.toString()))
                 out.write(Multipart.header(boundary, filename, mimeType))
                 val result = copyHashing(input, out, onProgress, checkCancelled)
                 out.write(Multipart.footer(boundary))

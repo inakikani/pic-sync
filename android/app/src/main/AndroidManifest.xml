@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <!-- Android 14+ "allow limited access" (selected photos only). -->
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <!-- Without this Android removes the GPS location from photos/videos before the
+         app can read them, so uploads would arrive on the Mac without location. -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
     <!-- Optional special access, granted by the user in Settings:
          lets batch trash requests complete without the system confirmation. -->

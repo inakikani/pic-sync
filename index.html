@@ -42,6 +42,9 @@ input.addEventListener('change', () => {
 function uploadOne(file, statusEl) {
   return new Promise(resolve => {
     const fd = new FormData();
+    // The file's date, sent before the file. The server prefers the capture date stored
+    // in the photo/video itself and only uses this for files without one.
+    fd.append('mtime', String(file.lastModified));
     fd.append('file', file, file.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/upload');

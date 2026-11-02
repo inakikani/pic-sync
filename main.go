@@ -13,7 +13,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed index.html
@@ -159,6 +161,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 		return
 	}
 	saved := []savedFile{}
+	var clientTime time.Time // from an "mtime" field (ms since epoch) sent before the file
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -170,11 +173,15 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 			return
 		}
 		if part.FileName() == "" {
+			if part.FormName() == "mtime" {
+				clientTime = parseMillis(part)
+			}
 			part.Close()
 			continue // ordinary form field
 		}
 		t.setName(part.FileName())
-		res, err := st.save(part.FileName(), t.reader(part))
+		res, err := st.save(part.FileName(), t.reader(part), clientTime)
+		clientTime = time.Time{} // applies to the next file only
 		part.Close()
 		if err != nil {
 			st.act.recordError(part.FileName(), err)
@@ -199,6 +206,17 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 }
 
 // sanitizeName strips any directory components a client may send.
+// parseMillis reads a small form field holding milliseconds since the Unix
+// epoch, as sent by File.lastModified. Anything else gives the zero time.
+func parseMillis(r io.Reader) time.Time {
+	b, _ := io.ReadAll(io.LimitReader(r, 32))
+	ms, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil || ms <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
+}
+
 func sanitizeName(raw string) (string, error) {
 	name := filepath.Base(strings.ReplaceAll(raw, "\\", "/"))
 	if name == "" || name == "." || name == ".." || name == "/" || strings.HasPrefix(name, ".") {

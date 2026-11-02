@@ -104,13 +104,17 @@ private object DiscardOutputStream : OutputStream() {
 
 fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
-/** Minimal multipart/form-data framing for a single file part named "file". */
+/** Minimal multipart/form-data framing: optional plain fields, then one file part named "file". */
 object Multipart {
     fun header(boundary: String, filename: String, mimeType: String): ByteArray =
         ("--$boundary\r\n" +
             "Content-Disposition: form-data; name=\"file\"; filename=\"${safeFilename(filename)}\"\r\n" +
             "Content-Type: ${mimeType.ifBlank { "application/octet-stream" }}\r\n\r\n")
             .toByteArray(Charsets.UTF_8)
+
+    /** A plain form field, written before the file part. */
+    fun field(boundary: String, name: String, value: String): ByteArray =
+        "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n".toByteArray(Charsets.UTF_8)
 
     fun footer(boundary: String): ByteArray = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
 

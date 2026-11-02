@@ -70,6 +70,8 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 ## Behaviour
 
 - **Duplicates are detected by content, not name.** Each upload is SHA-256 hashed while it streams to disk and compared with existing files in `upload_dir` of the same size. If an identical file is already there, the upload is discarded and the page shows **already on Mac**. This works even for renamed copies and files you put in the folder yourself. Hashing happens during the transfer, so it doesn't noticeably slow uploads. A duplicate is still sent over the network before it's detected.
+- **Files keep their original date.** The saved copy gets the date the photo or video was taken as its modification date (in Finder, *Created* moves back with it), not the upload time. The date comes from the file itself (EXIF in JPEG and HEIC, the movie header in MP4/MOV); for files without one (e.g. PNG screenshots) the date sent by the browser or the Android app is used. The file's contents, including EXIF, are never modified.
+- **Location (GPS):** the server stores exactly the bytes it receives. Android removes the location from photos it hands to apps that lack the *media location* permission, so the Android app asks for it (part of *Photos and videos*). Phone browsers can strip location too, before the file is sent, and the server can't restore it; on Android, use the app if you need location.
 - Existing files are never overwritten. A duplicate name is saved as `IMG_001 (1).jpg`, `IMG_001 (2).jpg`, and so on.
 - Uploads go to a hidden `.upload-*.part` temp file first and are renamed only once complete, so an interrupted upload leaves no partial file.
 - Directory parts of client filenames are stripped, and hidden/dot names are rejected.
@@ -96,7 +98,7 @@ At startup it prints a **QR code** of the server URL in the terminal. Scan it wi
 
 **Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
 
-**Permissions:** photos and videos (limited access works too), and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.
+**Permissions:** photos and videos (limited access works too) including their location, so uploads keep GPS data, and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.
 
 ## Development
 

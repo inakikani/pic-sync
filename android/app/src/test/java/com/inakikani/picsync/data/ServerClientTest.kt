@@ -23,6 +23,7 @@ class ServerClientTest {
     private var mode = "honest"
     private var receivedFilename: String? = null
     private var receivedBody: ByteArray? = null
+    private var receivedMtime: String? = null
 
     @Before fun start() {
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -37,9 +38,12 @@ class ServerClientTest {
     private fun handleUpload(ex: HttpExchange) {
         val boundary = ex.requestHeaders.getFirst("Content-Type").substringAfter("boundary=")
         val raw = ex.requestBody.readBytes()
-        val headerEnd = indexOf(raw, "\r\n\r\n".toByteArray()) + 4
+        // Latin-1 maps bytes 1:1, so string offsets are byte offsets.
+        val text = String(raw, Charsets.ISO_8859_1)
+        receivedMtime = Regex("name=\"mtime\"\r\n\r\n([^\r]*)\r\n").find(text)?.groupValues?.get(1)
+        val headerEnd = text.indexOf("\r\n\r\n", text.indexOf("filename=")) + 4
         val footer = "\r\n--$boundary--\r\n".toByteArray()
-        val header = String(raw, 0, headerEnd, Charsets.UTF_8)
+        val header = String(raw, 0, headerEnd, Charsets.UTF_8).substringAfterLast("--$boundary")
         val content = raw.copyOfRange(headerEnd, raw.size - footer.size)
         assertTrue("footer intact", raw.copyOfRange(raw.size - footer.size, raw.size).contentEquals(footer))
         receivedFilename = Regex("filename=\"([^\"]*)\"").find(header)?.groupValues?.get(1)
@@ -58,8 +62,24 @@ class ServerClientTest {
         )
     }
 
-    private fun upload(data: ByteArray, name: String = "IMG_1.jpg") =
-        ServerClient(base).upload(ByteArrayInputStream(data), name, "image/jpeg", onProgress = {}, checkCancelled = {})
+    private fun upload(data: ByteArray, name: String = "IMG_1.jpg", takenAt: Long = 0) =
+        ServerClient(base).upload(
+            ByteArrayInputStream(data), name, "image/jpeg", takenAt = takenAt, onProgress = {}, checkCancelled = {},
+        )
+
+    @Test fun sendsTakenTimeBeforeTheFile() {
+        val data = "photo bytes".toByteArray()
+        val r = upload(data, takenAt = 1_700_000_000_123)
+        assertEquals("1700000000123", receivedMtime)
+        assertTrue(receivedBody!!.contentEquals(data))
+        assertEquals("IMG_1.jpg", receivedFilename)
+        assertTrue(r.verified)
+    }
+
+    @Test fun noTakenTimeNoField() {
+        upload("abc".toByteArray())
+        assertEquals(null, receivedMtime)
+    }
 
     @Test fun checkServerAcceptsPicSync() {
         ServerClient(base).checkServer() // no exception
@@ -106,7 +126,7 @@ class ServerClientTest {
     @Test fun unreachableServerThrows() {
         val client = ServerClient("http://127.0.0.1:1") // nothing listens on port 1
         assertThrows(IOException::class.java) {
-            client.upload(ByteArrayInputStream("abc".toByteArray()), "a.jpg", "image/jpeg", {}, {})
+            client.upload(ByteArrayInputStream("abc".toByteArray()), "a.jpg", "image/jpeg", 0, {}, {})
         }
     }
 
