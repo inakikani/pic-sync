@@ -30,7 +30,7 @@ Settings are in `~/Library/Application Support/pic-sync/config.json` (format [be
 On a Mac:
 
 ```sh
-git tag v1.0 && git push github v1.0
+git tag v1.0 && git push origin v1.0
 make release   # bin/pic-sync-1.0-macos.zip: universal, ad-hoc signed
 make pkg       # optional: bin/pic-sync-1.0.pkg, installs to /Applications
 gh release create v1.0 bin/pic-sync-1.0-macos.zip --title "pic-sync 1.0" --notes "…"
