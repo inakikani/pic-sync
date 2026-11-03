@@ -155,3 +155,7 @@ The server needs Go 1.25 or newer (`go` downloads it automatically if yours is o
 make test                      # server tests + compile-check of the menu bar code
 cd android && gradle test      # Android unit tests (or run them from Android Studio)
 ```
+
+## License
+
+[MIT](LICENSE). Third-party parts keep their own licenses: `rsc.io/qr` (BSD-3-Clause) and the Material Symbols icons in `android/app/src/main/res/drawable` (Apache 2.0).
