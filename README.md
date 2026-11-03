@@ -1,161 +1,123 @@
 # pic-sync
 
-A tiny LAN server for dumping photos and videos from a phone onto a Mac. You run it on the Mac, open the URL it prints in your phone's browser, pick files, and press Upload.
+A small LAN server for copying photos and videos from a phone to a Mac. Run it on the Mac, scan the QR code with the phone, pick files and upload.
 
-It's a single Go binary; its only dependency is `rsc.io/qr` for the startup QR code. The upload page is compiled in.
+It's a single Go binary with the upload page compiled in. Its only dependency is `rsc.io/qr`.
 
 ## Mac app
 
 ```sh
 make app              # Apple Silicon -> bin/pic-sync.app
-make app ARCH=amd64   # Intel Macs
+make app ARCH=amd64   # Intel
 ```
 
-Copy `pic-sync.app` to `/Applications` (or anywhere) and double-click it:
+Copy `pic-sync.app` anywhere (e.g. `/Applications`) and open it. It asks for a destination folder (defaulting to the last one) and then runs in the **menu bar**. The icon shows its state:
 
-1. A folder picker asks where to save the photos. It defaults to the folder you picked last time.
-2. pic-sync appears as an icon in the **menu bar** (top right) and runs in the background. The icon shows what it's doing:
-   - icon only: running, waiting for uploads
-   - **↑ 45%** or **↑ 12.3 MB**: receiving a file (**↑ 3 files** for several at once)
-   - **!**: an upload failed; open the menu to see the error (this clears the **!**)
-3. Click the icon for the menu:
-   - status, today's count (e.g. *Today: 148 received, 3 already on Mac · last 2 min ago*) and the last error, if any
-   - **Show QR code…**: a window with the QR code to scan with the phone, the phone address and the folder
-   - **Open QR page in browser**: the same, larger, in your browser
-   - **Open folder** in Finder, and **Change folder…** (new uploads go to the new folder right away)
-   - **Open log**: what pic-sync has been doing, in Console (see [troubleshooting](docs/troubleshooting.md))
-   - **Quit pic-sync**
+- icon only: waiting for uploads
+- **↑ 45%**, **↑ 12.3 MB** or **↑ 3 files**: receiving
+- **!**: an upload failed (opening the menu shows the error and clears it)
 
-The menu bar item needs to be built on a Mac (`make app` there; it uses the Xcode command line tools, which come with `git`). An app built elsewhere, e.g. cross-compiled from Linux, falls back to a **pic-sync is running** window with the QR code and **Open in browser** / **Stop** buttons.
+The menu shows today's count (e.g. *Today: 148 received, 3 already on Mac · last 2 min ago*) and the last error. It also has **Show QR code…**, **Open QR page in browser**, **Open folder**, **Change folder…** (takes effect immediately), **Open log** and **Quit pic-sync**. The QR page is only served to the Mac itself.
 
-The app keeps its settings in `~/Library/Application Support/pic-sync/config.json` (same format as below; `listen` sets the port) and writes a log to `~/Library/Logs/pic-sync.log`. The QR page is only served to the Mac itself, not to other devices on the LAN.
+The menu bar item needs cgo, so build on a Mac with the Xcode command line tools. A cross-compiled app shows a plain window with the QR code and **Open in browser** / **Stop** buttons instead.
 
-**Opening a downloaded copy the first time:** the app is not signed with an Apple Developer ID or notarized, so macOS blocks it at first with a *"pic-sync" can't be opened* / *can't verify the developer* warning. Allow it once:
+Settings are in `~/Library/Application Support/pic-sync/config.json` (format [below](#config)).
 
-1. Double-click `pic-sync.app` (or the `.pkg`) and dismiss the warning with **Done** / **OK**.
-2. Open **System Settings → Privacy & Security**, scroll down to *"pic-sync" was blocked…* and click **Open Anyway**, then confirm with your password.
+**First launch of a downloaded copy:** the app isn't notarized, so macOS blocks it. Dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Or run `xattr -dr com.apple.quarantine /Applications/pic-sync.app`. Apps you build yourself aren't affected; `make sign` ad-hoc signs them.
 
-From then on it opens normally. Alternatively, run `xattr -dr com.apple.quarantine /Applications/pic-sync.app` in Terminal. An app you built yourself isn't affected; you can ad-hoc sign it with `make sign`.
+### Releasing
 
-### Releasing (Mac)
-
-On the Mac, with the Xcode command line tools:
+On a Mac:
 
 ```sh
 git tag v1.0 && git push github v1.0
-make release        # bin/pic-sync-1.0-macos.zip: universal (Apple Silicon + Intel), ad-hoc signed
-make pkg            # optional: bin/pic-sync-1.0.pkg, an installer that puts the app in /Applications
+make release   # bin/pic-sync-1.0-macos.zip: universal, ad-hoc signed
+make pkg       # optional: bin/pic-sync-1.0.pkg, installs to /Applications
 gh release create v1.0 bin/pic-sync-1.0-macos.zip --title "pic-sync 1.0" --notes "…"
 ```
 
-`VERSION` defaults to the latest tag without the `v`; override it with `make release VERSION=1.1`. It's written into the app's `Info.plist`.
-
-## Choosing the UX
-
-Both UXs are in the same binary. Pick one with `-mode`:
-
-| `-mode` | UX |
-|---------|----|
-| `auto` (default) | app UX when launched from `pic-sync.app`, CLI otherwise |
-| `cli`  | terminal: folder from the config file, QR code printed in the terminal |
-| `app`  | folder picker dialog, QR page in the browser, running/Stop dialog |
-
-```sh
-./bin/pic-sync-darwin-arm64 -mode app                                    # app UX without the bundle
-bin/pic-sync.app/Contents/MacOS/pic-sync -mode cli -config config.json   # CLI from the bundle
-```
-
-In app mode, `-config` replaces the default `~/Library/Application Support/pic-sync/config.json`. The folder you choose is saved back to that file.
+The version comes from the latest tag. Override it with `VERSION=1.1`.
 
 ## Command line
 
 ```sh
-cp config.example.json config.json   # then edit upload_dir
-make build-mac                       # bin/pic-sync-darwin-arm64 (Apple Silicon) / -amd64 (Intel)
-./bin/pic-sync-darwin-arm64 -config config.json
+cp config.example.json config.json   # set upload_dir
+make build-mac                       # bin/pic-sync-darwin-arm64 / -amd64
+./bin/pic-sync-darwin-arm64 -config config.json   # or: go run . -config config.json
 ```
 
-Or on the Mac itself: `go run . -config config.json`.
+It prints a QR code of the server URL. The URL uses the Mac's default-route address (normally Wi-Fi). All LAN addresses are also printed. If macOS refuses to run a copied binary, run `xattr -d com.apple.quarantine <binary>`.
 
-At startup it prints a **QR code** of the server URL in the terminal. Scan it with the phone's camera (same Wi-Fi) to open the upload page. The QR encodes the address on the Mac's default route (normally Wi-Fi), and every LAN address is also printed as text in case you need a different one.
+### Modes
+
+The same binary does both. Choose with `-mode`:
+
+| `-mode` | UX |
+|---------|----|
+| `auto` (default) | app when launched from `pic-sync.app`, otherwise CLI |
+| `cli`  | config file, QR code in the terminal |
+| `app`  | folder picker, then the menu bar (or the running/Stop window) |
+
+In app mode, `-config` overrides the default config path, and the chosen folder is saved to it.
 
 ## Config
 
-| key          | required | default | meaning                                   |
-|--------------|----------|---------|-------------------------------------------|
-| `upload_dir` | yes      |         | where files are written; `~` is expanded; created if missing |
-| `listen`     | no       | `:8080` | address/port to listen on                 |
-| `log_file`   | no       |         | CLI mode: also write the log to this file (capped at 5 MB, one `.1` copy kept). The app always logs to `~/Library/Logs/pic-sync.log` |
+| key          | required | default | meaning |
+|--------------|----------|---------|---------|
+| `upload_dir` | yes      |         | destination; `~` expanded; created if missing |
+| `listen`     | no       | `:8080` | listen address/port |
+| `log_file`   | no       |         | CLI only: also log to this file (5 MB cap, one `.1` backup) |
 
 ## Behaviour
 
-- **Duplicates are detected by content, not name.** Each upload is SHA-256 hashed while it streams to disk and compared with existing files in `upload_dir` of the same size. If an identical file is already there, the upload is discarded and the page shows **already on Mac**. This works even for renamed copies and files you put in the folder yourself. Hashing happens during the transfer, so it doesn't noticeably slow uploads. A duplicate is still sent over the network before it's detected.
-- **Files keep their original date.** The saved copy gets the date the photo or video was taken as its modification date (in Finder, *Created* moves back with it), not the upload time. The date comes from the file itself (EXIF in JPEG and HEIC, the movie header in MP4/MOV); for files without one (e.g. PNG screenshots) the date sent by the browser or the Android app is used. The file's contents, including EXIF, are never modified.
-  Files uploaded before this existed can be fixed the same way: `pic-sync -fix-dates ~/Pictures/phone-dump -dry-run` shows what would change, and without `-dry-run` it applies it (only files with a date inside are changed).
-- **Location (GPS):** the server stores exactly the bytes it receives. Android removes the location from photos it hands to apps that lack the *media location* permission. The Android app asks for it together with photo access; if photo access was already given (by an older version), allow it in the app under **Settings → Photo location**. Phone browsers can strip location too, before the file is sent, and the server can't restore it; on Android, use the app if you need location.
-- Existing files are never overwritten. A duplicate name is saved as `IMG_001 (1).jpg`, `IMG_001 (2).jpg`, and so on.
-- Uploads go to a hidden `.upload-*.part` temp file first and are renamed only once complete, so an interrupted upload leaves no partial file.
-  - **Stalled connections:** an upload fails if no data arrives for 30 s, e.g. when the phone leaves Wi-Fi.
-  - **Quitting:** quitting (Ctrl-C, **Quit pic-sync**, logout) gives uploads in progress 5 s to finish and removes their temp files.
-  - **Crashes:** temp files left by a crash are deleted at the next start.
-- Directory parts of client filenames are stripped, and hidden/dot names are rejected.
-- There is **no authentication**. Anyone on your LAN can upload while the server runs, so only run it on trusted networks and stop it (Ctrl-C) when you're done. Web pages from other sites can't upload through your browser: such cross-site requests are rejected with 403.
+- **Duplicates are detected by content.** Each upload is SHA-256 hashed as it streams and compared with same-size files in `upload_dir`. Identical files are discarded and reported as **already on Mac**, even if renamed. The file is still transferred before this check.
+- **Files keep their original date.** The modification date is set from EXIF (JPEG, HEIC) or the movie header (MP4, MOV), or from the date sent by the client if the file has none. File contents are never modified. To fix older uploads, run `pic-sync -fix-dates <dir>`; add `-dry-run` to preview.
+- **Location (GPS)** is stored if it arrives. Android strips it for apps without the *media location* permission, and phone browsers may strip it too. On Android, use the app (**Settings → Photo location**) to keep it.
+- **Nothing is overwritten.** Name clashes become `IMG_001 (1).jpg`, `IMG_001 (2).jpg`, and so on.
+- **No partial files.** Uploads are written to a hidden `.upload-*.part` file and renamed when complete. An upload fails after 30 s without data. On quit, in-progress uploads get 5 s to finish. Leftover temp files are deleted at startup.
+- **Filenames are sanitised.** Directory parts are stripped and dot names rejected.
+- **No authentication.** Anyone on the LAN can upload while it runs, so only use it on trusted networks. Cross-site requests from other web pages are rejected with 403.
 
-## macOS notes (both modes)
+On first run macOS may ask to allow incoming connections. Choose **Allow**.
 
-- On first run macOS may ask whether to allow incoming network connections. Choose **Allow**, or the phone won't be able to connect.
-- If you copied a binary that macOS refuses to open, clear the quarantine flag with `xattr -d com.apple.quarantine bin/pic-sync-darwin-arm64`.
+## Android app
 
-## Android companion app
+`android/` contains an optional Android 13+ app (Material 3 Expressive). Unlike the browser page, it can **move uploaded photos to the phone's trash**.
 
-The app follows Android 16/17's design language, Material 3 Expressive. It uses your wallpaper's colours, springy motion, connected button groups, wavy progress bars and shape-morphing buttons.
+**Install:** open `android/` in Android Studio, set **Build Variants → app** to **release**, connect the phone and press Run. The debug build is unoptimised and can stutter. The release build is signed with your debug key, so it installs over the debug build and keeps app data.
 
-`android/` contains an optional Android app (Android 13+) that uploads photos to this server and can then **move the uploaded ones to the phone's trash**. The browser page can't delete anything on the phone; the app can.
+**Use:**
+1. Start pic-sync on the Mac, then tap **Scan QR code** (or type the address).
+2. Optionally pick an **album** and switch between **All / To upload / Uploaded**. The **filters** button narrows by type, date taken and minimum size. Only on-device albums appear, not cloud-only Google Photos albums.
+3. Select photos (or **Select not uploaded**, or **Select N** on a month header) and tap **Upload**. The screen stays on while uploading.
+4. Tap **Move N uploaded to trash**. This applies to the current album and filters. Android asks once per batch, and trashed items are recoverable for 30 days.
 
-**Build and install:** open the `android/` folder in Android Studio, connect your phone (USB or wireless debugging) and press Run. Studio downloads Gradle 9.6.1 and the dependencies on first sync.
+The grid is grouped by month, newest first. Tap a thumbnail's full-screen button to view it. Swipe to browse, pinch or double-tap to zoom, and tap to toggle the info bar. **Long-press** a photo to skip it. Skipped photos are never selected, uploaded or trashed, and this is remembered across restarts.
 
-**For everyday use, install the release build:** in Android Studio open **Build Variants**, set `app` to **release**, then press Run. The default debug build is unoptimised and debuggable, so scrolling can stutter. The release build is optimised by R8 and uses Compose's precompiled baseline profiles. It is signed with your local debug key, so it installs over the debug build and keeps the app's data.
+**Sharing from other apps:** **Share → pic-sync** sends to the last Mac (scanning first if there is none). Keep the screen open until it's done. Cloud-only Google Photos items work too. Each verified file is matched to the phone's library by size and SHA-256 so it can be trashed later. Unmatched files (cloud-only or changed by Google Photos) are never trashed.
 
-**Using it:**
-1. Start pic-sync on the Mac. In the app, tap **Scan QR code** (or type the address).
-2. Optionally pick an **album** (Camera, Screenshots, WhatsApp Images, …) from the row at the top. Each one shows how many items still need uploading. Cloud-only Google Photos albums aren't visible to other apps, so only on-device folders appear.
-3. Use the **All / To upload / Uploaded** buttons to show everything, only what's left to send, or only what's already verified on the Mac. Optionally tap the **filters** button (sliders icon) to narrow the view by **type** (photos/videos), **date taken** (last 7/30 days, this year, older than a year, or a custom range) and **minimum size** in MB.
-4. Pick photos (or **Select not uploaded**) and tap **Upload**. The screen stays on while uploading.
-   The grid is grouped by month (e.g. **November 2026 · 132 · 20 to upload**), newest first by date taken. While you scroll, a label at the top shows which month you're in. To upload a whole month, tap **Select N** on its header (it picks only what isn't uploaded or skipped yet), then **Upload**. Tap **Deselect** to undo.
-   To look at a photo or video full screen, tap the full-screen button in the corner of its thumbnail. Swipe for the next one, pinch or double-tap to zoom, and tap to show or hide the info bar (date, size, upload status, **Select**). Videos play with the usual controls. Back or the close button closes it.
-   **Long-press** a photo to skip it (it dims and shows ⊘): it's never selected, uploaded or moved to trash, and doesn't count as *not uploaded*. Long-press again to undo. The app remembers skipped photos across restarts.
-5. Tap **Move N uploaded to trash**. This applies to what you're viewing (album + filters), e.g. *Videos · Older than 1 year · ≥ 100 MB*, or to everything under *All photos* with no filters. Android asks once for the whole batch, and the photos stay recoverable in the phone's trash for 30 days.
+**Safety:** a photo is only offered for trashing if the server's size and SHA-256 matched what the phone sent. Photos edited after upload are re-hashed and skipped if they changed.
 
-**Sharing from Google Photos (or any app):** select photos or videos, tap **Share → pic-sync**, and they're sent to the Mac you last connected to. If there isn't one yet, the QR scan comes first.
-- **Keep the screen open** until it's done: Android only lets pic-sync read shared files while that screen is open.
-- **Cloud-only photos:** Google Photos downloads them first, so photos that aren't stored on the phone can be sent this way too.
-- **Moving to trash later:** each verified file is matched to the same photo in the phone's library (same size, then identical SHA-256). A match counts as uploaded in the pic-sync gallery and can be moved to trash from there later. The screen shows for each file whether it was found on the phone.
-- **No match:** a cloud-only photo, or a version Google Photos changed (edited, compressed, location removed), isn't linked to anything on the phone, so it's never trashed.
+**Other devices:** **Settings → Show QR code for the upload page** shows the Mac's address so another device on the Wi-Fi can upload from its browser.
 
-**Safety:** a photo is only ever offered for trashing if the server's reported size and SHA-256 matched the bytes the phone sent, including uploads the server recognised as duplicates. If a photo was edited after uploading, it's re-hashed before trashing and skipped if it no longer matches.
-
-**Other devices:** in the app, **Settings → Show QR code for the upload page** shows the Mac's address as a QR code at full screen brightness. Another phone or tablet on the same Wi-Fi (an iPhone, say) can scan it with its camera and upload from its browser, without going to the Mac.
-
-**Permissions:** photos and videos (limited access works too) including their location, so uploads keep GPS data, and on Android 17 **Nearby devices / local network**, which is needed to reach the Mac. Optionally, allow **Media management** for pic-sync in Android Settings so trashing doesn't need the system confirmation. The app then asks for confirmation itself.
+**Permissions:** photos and videos (limited access works) with location, and on Android 17 **Nearby devices / local network**. Optionally grant **Media management** to skip the system confirmation when trashing. The app then confirms itself.
 
 ## Logs and troubleshooting
 
-- **Mac:** the log shows every request, saved file and error. It is in the terminal, or for the app in `~/Library/Logs/pic-sync.log` (menu bar → **Open log**). Add `-debug` for more detail.
-- **Android app:** tap a **!** photo to see why it failed. **Settings → Share diagnostics** sends the app's log.
+- **Mac:** logs go to the terminal or, for the app, `~/Library/Logs/pic-sync.log` (**Open log** in the menu). Add `-debug` for more detail.
+- **Android:** tap a **!** photo to see why it failed. **Settings → Share diagnostics** sends the log.
 
-[docs/troubleshooting.md](docs/troubleshooting.md) explains what is logged, how to read it, and fixes for common problems (phone can't connect, interrupted uploads, wrong dates, missing location, …).
+See [docs/troubleshooting.md](docs/troubleshooting.md) for common problems and fixes.
 
 ## Development
 
-Keeping the app smooth and light: see [docs/performance.md](docs/performance.md) before changing the gallery, image loading, uploads or the server's upload path.
-
-The server needs Go 1.25 or newer (`go` downloads it automatically if yours is older).
+Read [docs/performance.md](docs/performance.md) before changing the gallery, image loading or upload paths. The server needs Go 1.25+.
 
 ```sh
-make test                      # server tests + compile-check of the menu bar code
-cd android && gradle test      # Android unit tests (or run them from Android Studio)
+make test                      # server tests + menu bar compile check
+cd android && gradle test      # Android unit tests
 ```
 
 ## License
 
-[MIT](LICENSE). Third-party parts keep their own licenses: `rsc.io/qr` (BSD-3-Clause) and the Material Symbols icons in `android/app/src/main/res/drawable` (Apache 2.0).
+[MIT](LICENSE). `rsc.io/qr` is BSD-3-Clause; the Material Symbols icons in `android/app/src/main/res/drawable` are Apache 2.0.
