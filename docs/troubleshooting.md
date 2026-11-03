@@ -140,3 +140,10 @@ On the phone:
 
 **Android app crashes**
 - The crash and its stack trace are in the app log. After reopening the app, use **Share diagnostics**, or check Logcat in Android Studio.
+- **Release builds** have obfuscated stack traces (`az2.e(r8-map-id-…)`). Decode them with the mapping file of the same build: `make apk` saves it as `bin/pic-sync-<VERSION>-mapping.txt`.
+  ```sh
+  adb logcat -d -b crash > crash.txt
+  ~/Library/Android/sdk/cmdline-tools/latest/bin/retrace bin/pic-sync-1.0-mapping.txt crash.txt
+  ```
+  `retrace` comes with **Android SDK Command-line Tools** (Android Studio → Settings → Android SDK → SDK Tools).
+- **Crashes only in the release build** usually mean R8 removed something a library uses by reflection. Add a keep rule to `android/app/proguard-rules.pro`.

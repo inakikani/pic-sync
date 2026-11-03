@@ -65,12 +65,15 @@ pkg: universal
 # Android Studio writes when it opens the project.
 GRADLE  ?= $(if $(wildcard android/gradlew),./gradlew,gradle)
 APK_OUT := android/app/build/outputs/apk/release/app-release.apk
+# R8's mapping file, needed to read stack traces from that APK (see docs/troubleshooting.md).
+MAP_OUT := android/app/build/outputs/mapping/release/mapping.txt
 
 apk:
 	@test -n "$(VERSION)" || { echo "set VERSION, e.g. make apk VERSION=1.0 (or tag a commit v1.0)"; exit 1; }
 	cd android && $(GRADLE) assembleRelease -Ppicsync.version=$(VERSION)
 	mkdir -p $(BIN)
 	cp $(APK_OUT) $(BIN)/pic-sync-$(VERSION).apk
+	cp $(MAP_OUT) $(BIN)/pic-sync-$(VERSION)-mapping.txt
 	@echo "built $(BIN)/pic-sync-$(VERSION).apk"
 
 # Everything for a GitHub release: the zipped app, the pkg and the APK. Mac only.

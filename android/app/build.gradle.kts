@@ -46,7 +46,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signed with the local debug key so Android Studio can install it over the
             // debug build without uninstalling (same app, data kept). Not for the Play Store.
             signingConfig = signingConfigs.getByName("debug")
