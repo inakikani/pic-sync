@@ -1,5 +1,5 @@
 [versions]
-# AGP 9.4 pairs with Gradle 9.6 and supports compileSdk 37 (Android 17).
+# AGP 9.5 needs Gradle 9.6.0 or newer (the wrapper pins 9.6.1) and supports compileSdk 37 (Android 17).
 # AGP 9 has built-in Kotlin support, so no separate kotlin-android plugin is applied;
 # the Compose compiler plugin version selects the Kotlin version.
 agp = "9.5.0"
