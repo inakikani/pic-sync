@@ -31,12 +31,16 @@ On a Mac:
 
 ```sh
 git tag v1.0 && git push origin v1.0
+make dist      # all three below
 make release   # bin/pic-sync-1.0-macos.zip: universal, ad-hoc signed
-make pkg       # optional: bin/pic-sync-1.0.pkg, installs to /Applications
-gh release create v1.0 bin/pic-sync-1.0-macos.zip --title "pic-sync 1.0" --notes "…"
+make pkg       # bin/pic-sync-1.0.pkg, installs to /Applications
+make apk       # bin/pic-sync-1.0.apk: Android release build
+gh release create v1.0 bin/pic-sync-1.0* --title "pic-sync 1.0" --notes "…"
 ```
 
-The version comes from the latest tag. Override it with `VERSION=1.1`.
+The version comes from the latest tag. Override it with `VERSION=1.1`. The Android app gets the same version, and `versionCode` is derived from it (1.2.3 → 1002003), so each release installs as an update.
+
+`make apk` uses `android/gradlew` if present, otherwise `gradle` on the `PATH` (override with `GRADLE=…`). It needs a JDK, e.g. `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`, and `android/local.properties`, which Android Studio creates. The APK is signed with your local debug key, so updates only install over APKs built on the same machine.
 
 ## Command line
 

@@ -3,6 +3,27 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// App version, shared with the Mac app. `make apk` passes -Ppicsync.version=$(VERSION);
+// builds from Android Studio use the latest git tag (v1.2 -> 1.2), so they never get
+// a lower versionCode than an installed release APK. "1.0" if there is no tag.
+val appVersion: String = providers.gradleProperty("picsync.version").orNull
+    ?: runCatching {
+        providers.exec {
+            commandLine("git", "describe", "--tags", "--abbrev=0")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim().removePrefix("v")
+    }.getOrDefault("").ifEmpty { "1.0" }
+
+// 1.2 -> 1_002_000, 1.2.3 -> 1_002_003: every newer release installs as an update.
+fun versionCodeOf(version: String): Int {
+    val parts = version.split(".").map { it.toIntOrNull() ?: -1 }
+    require(parts.size in 1..3 && parts.all { it in 0..999 }) {
+        "version must look like 1.2 or 1.2.3 (each part 0-999), got \"$version\""
+    }
+    val (major, minor, patch) = parts + List(3 - parts.size) { 0 }
+    return major * 1_000_000 + minor * 1_000 + patch
+}
+
 android {
     namespace = "com.inakikani.picsync"
     compileSdk = 37
@@ -13,8 +34,8 @@ android {
         // MANAGE_MEDIA are all available, so there are no legacy code paths.
         minSdk = 33
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = versionCodeOf(appVersion)
+        versionName = appVersion
     }
 
     buildTypes {

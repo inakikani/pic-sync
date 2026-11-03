@@ -9,7 +9,7 @@ CGO  ?= $(if $(filter Darwin,$(shell uname -s)),1,0)
 # git tag without its leading "v" (tag v1.2 -> 1.2).
 VERSION ?= $(patsubst v%,%,$(shell git describe --tags --abbrev=0 2>/dev/null))
 
-.PHONY: build build-mac app sign universal release pkg test
+.PHONY: build build-mac app sign universal release pkg apk dist test
 
 build:
 	go build -o $(BIN)/pic-sync .
@@ -57,6 +57,26 @@ pkg: universal
 		--identifier com.inakikani.pic-sync --version $(VERSION) \
 		$(BIN)/pic-sync-$(VERSION).pkg
 	@echo "built $(BIN)/pic-sync-$(VERSION).pkg"
+
+# Android release APK: bin/pic-sync-<VERSION>.apk, with the same version as the
+# Mac app. Uses android/gradlew if there is one, otherwise `gradle` on the PATH;
+# override with GRADLE=... Needs a JDK (e.g. JAVA_HOME="/Applications/Android
+# Studio.app/Contents/jbr/Contents/Home") and android/local.properties, which
+# Android Studio writes when it opens the project.
+GRADLE  ?= $(if $(wildcard android/gradlew),./gradlew,gradle)
+APK_OUT := android/app/build/outputs/apk/release/app-release.apk
+
+apk:
+	@test -n "$(VERSION)" || { echo "set VERSION, e.g. make apk VERSION=1.0 (or tag a commit v1.0)"; exit 1; }
+	cd android && $(GRADLE) assembleRelease -Ppicsync.version=$(VERSION)
+	mkdir -p $(BIN)
+	cp $(APK_OUT) $(BIN)/pic-sync-$(VERSION).apk
+	@echo "built $(BIN)/pic-sync-$(VERSION).apk"
+
+# Everything for a GitHub release: the zipped app, the pkg and the APK. Mac only.
+dist: release pkg apk
+	@echo "release files:"
+	@ls -1 $(BIN)/pic-sync-$(VERSION)-macos.zip $(BIN)/pic-sync-$(VERSION).pkg $(BIN)/pic-sync-$(VERSION).apk
 
 test:
 	go test ./...
