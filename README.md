@@ -30,7 +30,25 @@ The menu bar item needs to be built on a Mac (`make app` there; it uses the Xcod
 
 The app keeps its settings in `~/Library/Application Support/pic-sync/config.json` (same format as below; `listen` sets the port) and writes a log to `~/Library/Logs/pic-sync.log`. The QR page is only served to the Mac itself, not to other devices on the LAN.
 
-The app is not signed with an Apple developer ID. If macOS refuses to open it, right-click it and choose **Open** once, or run `xattr -cr pic-sync.app`. On the Mac you can also ad-hoc sign it with `make sign`.
+**Opening a downloaded copy the first time:** the app is not signed with an Apple Developer ID or notarized, so macOS blocks it at first with a *"pic-sync" can't be opened* / *can't verify the developer* warning. Allow it once:
+
+1. Double-click `pic-sync.app` (or the `.pkg`) and dismiss the warning with **Done** / **OK**.
+2. Open **System Settings → Privacy & Security**, scroll down to *"pic-sync" was blocked…* and click **Open Anyway**, then confirm with your password.
+
+From then on it opens normally. Alternatively, run `xattr -dr com.apple.quarantine /Applications/pic-sync.app` in Terminal. An app you built yourself isn't affected; you can ad-hoc sign it with `make sign`.
+
+### Releasing (Mac)
+
+On the Mac, with the Xcode command line tools:
+
+```sh
+git tag v1.0 && git push github v1.0
+make release        # bin/pic-sync-1.0-macos.zip: universal (Apple Silicon + Intel), ad-hoc signed
+make pkg            # optional: bin/pic-sync-1.0.pkg, an installer that puts the app in /Applications
+gh release create v1.0 bin/pic-sync-1.0-macos.zip --title "pic-sync 1.0" --notes "…"
+```
+
+`VERSION` defaults to the latest tag without the `v`; override it with `make release VERSION=1.1`. It's written into the app's `Info.plist`.
 
 ## Choosing the UX
 
