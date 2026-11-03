@@ -4,6 +4,21 @@ A small LAN server for copying photos and videos from a phone to a Mac. Run it o
 
 It's a single Go binary with the upload page compiled in. Its only dependency is `rsc.io/qr`.
 
+## Install
+
+Download the files from the [latest release](https://github.com/inakikani/pic-sync/releases/latest).
+
+**Mac** (macOS 12 or newer, Apple Silicon or Intel):
+1. Download either `pic-sync-<version>.pkg` (installs to `/Applications`) or `pic-sync-<version>-macos.zip` (unzip and move `pic-sync.app` to `/Applications`).
+2. The app isn't notarized, so macOS blocks it the first time. Dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Or run `xattr -dr com.apple.quarantine /Applications/pic-sync.app`.
+3. Open pic-sync, choose the folder for your photos, and allow incoming connections if macOS asks. It then runs in the [menu bar](#mac-app).
+
+**Android** (Android 13 or newer):
+1. Download `pic-sync-<version>.apk` on the phone and open it. Android asks you once to allow installs from your browser or file manager.
+2. Open pic-sync, allow photo access, and tap **Scan QR code**. The QR code is under **Show QR code…** in the Mac's menu bar. See [Android app](#android-app) for how to use it.
+
+To update, install the new release over the old one. Your settings are kept.
+
 ## Mac app
 
 ```sh
@@ -23,7 +38,7 @@ The menu bar item needs cgo, so build on a Mac with the Xcode command line tools
 
 Settings are in `~/Library/Application Support/pic-sync/config.json` (format [below](#config)).
 
-**First launch of a downloaded copy:** the app isn't notarized, so macOS blocks it. Dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Or run `xattr -dr com.apple.quarantine /Applications/pic-sync.app`. Apps you build yourself aren't affected; `make sign` ad-hoc signs them.
+Apps you build yourself aren't quarantined by macOS; `make sign` ad-hoc signs them.
 
 ### Releasing
 
