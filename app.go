@@ -98,8 +98,10 @@ func runApp(cfgPath string, debugLog bool) {
 	statusURL := fmt.Sprintf("http://localhost:%d/status", port)
 
 	st := newStore(cfg.UploadDir)
+	dirs, _ := cfg.folders() // checked by startListening
+	st.SetFolders(dirs)
 	mux := newStoreMux(st)
-	addStatusPage(mux, st.Dir, url)
+	addStatusPage(mux, func() []string { return st.Folders().summary() }, url)
 
 	// The server runs until the user quits (quit) or macOS asks the app to stop,
 	// e.g. at logout (SIGTERM). Either way it shuts down cleanly: uploads in
@@ -129,7 +131,7 @@ func runApp(cfgPath string, debugLog bool) {
 		// Menu bar item (macOS builds with cgo, i.e. "make app" on a Mac).
 		runTray(&trayApp{st: st, phoneURL: url, statusURL: statusURL, cfgPath: cfgPath, cfg: cfg})
 	} else {
-		runningUI(cfg.UploadDir, url, statusURL)
+		runningUI(strings.Join(dirs.summary(), "\n"), url, statusURL)
 	}
 	slog.Info("stopped by user")
 	quit()
@@ -151,8 +153,8 @@ type trayApp struct {
 // It prefers a native alert with the QR code inside; if that can't be shown
 // (e.g. a scripting error on some macOS version) it falls back to the plain
 // AppleScript dialog plus the QR page in the browser.
-func runningUI(dir, phoneURL, statusURL string) {
-	msg := fmt.Sprintf("Scan with your phone, or open:\n%s\n\nPhotos are saved to:\n%s", phoneURL, dir)
+func runningUI(dirs, phoneURL, statusURL string) {
+	msg := fmt.Sprintf("Scan with your phone, or open:\n%s\n\nFiles are saved to:\n%s", phoneURL, dirs)
 
 	qrPath, err := writeTempQR(phoneURL)
 	if err == nil {
@@ -173,7 +175,7 @@ func runningUI(dir, phoneURL, statusURL string) {
 	}
 
 	openBrowser(statusURL)
-	for runningDialog(dir, phoneURL) == "Show QR code" {
+	for runningDialog(dirs, phoneURL) == "Show QR code" {
 		openBrowser(statusURL)
 	}
 }
@@ -253,7 +255,7 @@ func qrAlert(msg, qrPath string, buttons ...string) (string, error) {
 
 // addStatusPage registers the Mac-side page showing the QR code. It is only
 // served to the Mac itself, never to devices on the LAN.
-func addStatusPage(mux *http.ServeMux, dir func() string, phoneURL string) {
+func addStatusPage(mux *http.ServeMux, dirs func() []string, phoneURL string) {
 	localOnly := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			host, _, _ := net.SplitHostPort(r.RemoteAddr)
@@ -266,7 +268,7 @@ func addStatusPage(mux *http.ServeMux, dir func() string, phoneURL string) {
 	}
 	mux.HandleFunc("GET /status", localOnly(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := statusTmpl.Execute(w, map[string]string{"URL": phoneURL, "Dir": dir()}); err != nil {
+		if err := statusTmpl.Execute(w, map[string]any{"URL": phoneURL, "Folders": dirs()}); err != nil {
 			slog.Warn("rendering status page", "err", err)
 		}
 	}))
@@ -293,7 +295,7 @@ var statusTmpl = template.Must(template.New("status").Parse(`<!DOCTYPE html>
 <h1>Scan with your phone</h1>
 <img src="/qr.png" alt="QR code for {{.URL}}">
 <p>or open <code>{{.URL}}</code></p>
-<p class="dir">Saving to {{.Dir}}</p>
+<p class="dir">Saving to:<br>{{range .Folders}}{{.}}<br>{{end}}</p>
 <p class="dir">Quit pic-sync from its menu bar icon (or its window) to stop the server.</p>
 </body></html>`))
 
@@ -320,7 +322,15 @@ func runOsascript(scriptArgs []string, args ...string) (string, error) {
 }
 
 func chooseFolder(defaultDir string) (string, error) {
-	const prompt = "Where should photos from your phone be saved?"
+	return chooseFolderFor(catPhotos, defaultDir)
+}
+
+// chooseFolderFor asks where files of category c should be saved.
+func chooseFolderFor(c category, defaultDir string) (string, error) {
+	prompt := "Where should " + strings.ToLower(c.label()) + " from your phone be saved?"
+	if c == catOther {
+		prompt = "Where should other files from your phone be saved?"
+	}
 	if info, err := os.Stat(defaultDir); defaultDir != "" && err == nil && info.IsDir() {
 		return osascript(`on run argv
 	activate
@@ -333,9 +343,19 @@ end run`, prompt, defaultDir)
 end run`, prompt)
 }
 
+// choiceDialog shows msg with the given buttons (the last one is the default)
+// and returns the button pressed. A button named "Cancel" returns errCanceled.
+func choiceDialog(msg string, buttons ...string) (string, error) {
+	return osascript(`on run argv
+	activate
+	set btns to items 2 thru -1 of argv
+	return button returned of (display dialog (item 1 of argv) with title "pic-sync" buttons btns default button (count of btns) cancel button "Cancel")
+end run`, append([]string{msg}, buttons...)...)
+}
+
 // runningDialog blocks until the user presses a button and returns its name.
-func runningDialog(dir, url string) string {
-	msg := fmt.Sprintf("pic-sync is running.\n\nOn your phone, open:\n%s\n\nPhotos are saved to:\n%s", url, dir)
+func runningDialog(dirs, url string) string {
+	msg := fmt.Sprintf("pic-sync is running.\n\nOn your phone, open:\n%s\n\nFiles are saved to:\n%s", url, dirs)
 	out, err := osascript(`on run argv
 	activate
 	return button returned of (display dialog (item 1 of argv) with title "pic-sync" buttons {"Show QR code", "Stop"} default button "Show QR code")

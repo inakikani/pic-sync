@@ -29,9 +29,13 @@ const apiVersion = "1"
 
 // Config is the JSON config file (CLI mode), and the app's saved settings.
 type Config struct {
-	UploadDir string `json:"upload_dir"`
-	Listen    string `json:"listen"`
-	LogFile   string `json:"log_file,omitempty"` // CLI mode: also log to this file (app mode always logs to ~/Library/Logs)
+	UploadDir string `json:"upload_dir"` // photos, and every category without its own folder
+	// Folders for the other categories: "videos", "documents", "other". Missing ones use upload_dir.
+	Folders map[string]string `json:"folders,omitempty"`
+	// Extension rules, e.g. {"zip": "~/Downloads"}. They win over the category folders.
+	Extensions map[string]string `json:"extensions,omitempty"`
+	Listen     string            `json:"listen"`
+	LogFile    string            `json:"log_file,omitempty"` // CLI mode: also log to this file (app mode always logs to ~/Library/Logs)
 }
 
 func loadConfig(path string) (Config, error) {
@@ -47,13 +51,13 @@ func loadConfig(path string) (Config, error) {
 		return cfg, errors.New("config: upload_dir is required")
 	}
 	for _, p := range []*string{&cfg.UploadDir, &cfg.LogFile} {
-		if *p == "~" || strings.HasPrefix(*p, "~/") {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return cfg, fmt.Errorf("expanding ~: %w", err)
-			}
-			*p = filepath.Join(home, strings.TrimPrefix(*p, "~"))
+		var err error
+		if *p, err = expandHome(*p); err != nil {
+			return cfg, err
 		}
+	}
+	if _, err := cfg.folders(); err != nil {
+		return cfg, err
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = ":8080"
@@ -134,6 +138,8 @@ func runCLI(configPath string, debugLog bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	st := newStore(cfg.UploadDir)
+	dirs, _ := cfg.folders() // checked by loadConfig
+	st.SetFolders(dirs)
 	err = serve(ctx, ln, newStoreMux(st))
 	st.removeTemps()
 	if err != nil {
@@ -147,13 +153,19 @@ func fatal(msg string, err error) {
 	os.Exit(1)
 }
 
-// startListening creates the upload dir, opens the listener, logs every LAN URL
-// and returns the URL most likely reachable from the phone.
+// startListening creates the upload folders, opens the listener, logs every LAN
+// URL and returns the URL most likely reachable from the phone.
 func startListening(cfg Config) (net.Listener, string, error) {
-	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
-		return nil, "", fmt.Errorf("creating upload folder: %w", err)
+	dirs, err := cfg.folders()
+	if err != nil {
+		return nil, "", err
 	}
-	removeStaleTemps(cfg.UploadDir, time.Now())
+	if err := createFolders(dirs); err != nil {
+		return nil, "", err
+	}
+	for _, line := range dirs.summary() {
+		slog.Info("folder", "for", line)
+	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return nil, "", fmt.Errorf("listening on %s (is another pic-sync already running?): %w", cfg.Listen, err)
@@ -173,6 +185,18 @@ func startListening(cfg Config) (net.Listener, string, error) {
 	}
 	slog.Info("listening", "addr", ln.Addr().String(), "qr_url", fmt.Sprintf("http://%s:%d", qrIP, port))
 	return ln, fmt.Sprintf("http://%s:%d", qrIP, port), nil
+}
+
+// createFolders makes every upload folder that doesn't exist yet and removes
+// temp files a crashed run left in them.
+func createFolders(f folders) error {
+	for _, d := range f.all() {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return fmt.Errorf("creating upload folder %s: %w", d, err)
+		}
+		removeStaleTemps(d, time.Now())
+	}
+	return nil
 }
 
 func newMux(dir string) *http.ServeMux {
@@ -234,7 +258,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 		name := part.FileName()
 		t.setName(name)
 		start := time.Now()
-		res, err := st.save(name, t.reader(part), clientTime)
+		res, err := st.save(name, part.Header.Get("Content-Type"), t.reader(part), clientTime)
 		took := time.Since(start)
 		clientTime = time.Time{} // applies to the next file only
 		part.Close()
@@ -270,7 +294,7 @@ func logSaved(res savedFile, client string, took time.Duration) {
 	if sp := speed(res.Size, took); sp != "" {
 		args = append(args, "speed", sp)
 	}
-	args = append(args, "client", client, "sha256", res.SHA256[:12])
+	args = append(args, "folder", res.Folder, "client", client, "sha256", res.SHA256[:12])
 	if res.Duplicate {
 		slog.Info("duplicate, not stored (identical file already in the folder)", args...)
 		return

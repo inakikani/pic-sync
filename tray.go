@@ -44,8 +44,23 @@ func (t *trayApp) onReady() {
 	mQR := systray.AddMenuItem("Show QR code…", "Show the code to scan with your phone")
 	mBrowser := systray.AddMenuItem("Open QR page in browser", "A larger QR code in your browser")
 	systray.AddSeparator()
-	mFolder := systray.AddMenuItem("", "Open the upload folder in Finder")
-	mChange := systray.AddMenuItem("Change folder…", "Choose where uploads are saved")
+	mFolder := systray.AddMenuItem("", "Open the photos folder in Finder")
+	// "Folders" submenu: one entry per category; clicking one changes its folder.
+	mFolders := systray.AddMenuItem("Folders", "Choose where each type of file is saved")
+	catItems := make([]*systray.MenuItem, len(categories))
+	catClicks := make(chan category, 1)
+	for i, c := range categories {
+		catItems[i] = mFolders.AddSubMenuItem("", "Change where "+strings.ToLower(c.label())+" are saved")
+		go func(item *systray.MenuItem, c category) {
+			for range item.ClickedCh {
+				catClicks <- c
+			}
+		}(catItems[i], c)
+	}
+	// Extension rules are only edited in config.json; list them for reference.
+	if exts := t.st.Folders().extList(); len(exts) > 0 {
+		mFolders.AddSubMenuItem("Extension rules (config.json): ."+strings.Join(exts, ", ."), "").Disable()
+	}
 	systray.AddSeparator()
 	mLog := systray.AddMenuItem("Open log", "Show what pic-sync has been doing (opens in Console)")
 	if logFilePath == "" {
@@ -55,7 +70,8 @@ func (t *trayApp) onReady() {
 
 	// Only push changes to AppKit, so an idle menu bar does no work.
 	var last trayStatus
-	var lastFolder string
+	var lastFolders folders
+	foldersShown := false
 	errShown := false
 	refresh := func() {
 		s := describe(t.st.act.snapshot(), time.Now(), time.Unix(0, t.errSeenAt.Load()))
@@ -80,9 +96,12 @@ func (t *trayApp) onReady() {
 				mErr.Hide()
 			}
 		}
-		if f := t.st.Dir(); f != lastFolder {
-			lastFolder = f
-			mFolder.SetTitle("Open folder: " + shortPath(f))
+		if f := t.st.Folders(); !foldersShown || !sameFolders(f, lastFolders) {
+			lastFolders, foldersShown = f, true
+			mFolder.SetTitle("Open folder: " + shortPath(f.Photos))
+			for i, c := range categories {
+				catItems[i].SetTitle(c.label() + ": " + f.describeFolder(c))
+			}
 		}
 		last = s
 	}
@@ -109,9 +128,9 @@ func (t *trayApp) onReady() {
 				openPath(t.st.Dir())
 			case <-mLog.ClickedCh:
 				openPath(logFilePath)
-			case <-mChange.ClickedCh:
+			case c := <-catClicks:
 				go func() {
-					t.changeFolder()
+					t.changeFolder(c)
 					select {
 					case changed <- struct{}{}:
 					default:
@@ -132,7 +151,7 @@ func (t *trayApp) showQR() {
 	}
 	defer t.busy.Store(false)
 
-	msg := fmt.Sprintf("Scan with your phone, or open:\n%s\n\nPhotos are saved to:\n%s", t.phoneURL, t.st.Dir())
+	msg := fmt.Sprintf("Scan with your phone, or open:\n%s\n\nFiles are saved to:\n%s", t.phoneURL, strings.Join(t.st.Folders().summary(), "\n"))
 	qrPath, err := writeTempQR(t.phoneURL)
 	if err != nil {
 		slog.Error("rendering QR image", "err", err)
@@ -151,14 +170,37 @@ func (t *trayApp) showQR() {
 	}
 }
 
-// changeFolder lets the user pick a new upload folder; new uploads go there.
-func (t *trayApp) changeFolder() {
+// changeFolder lets the user pick a new folder for category c; new uploads go
+// there. Categories other than photos can also go back to the photos folder.
+func (t *trayApp) changeFolder(c category) {
 	if !t.busy.CompareAndSwap(false, true) {
 		return
 	}
 	defer t.busy.Store(false)
 
-	dir, err := chooseFolder(t.st.Dir())
+	cur := t.st.Folders()
+	if c != catPhotos {
+		msg := fmt.Sprintf("%s are saved to:\n%s", c.label(), cur.describeFolder(c))
+		if c == catOther {
+			msg = fmt.Sprintf("Other files (not photos, videos or documents) are saved to:\n%s", cur.describeFolder(c))
+		}
+		buttons := []string{"Cancel", "Choose Folder…"}
+		if cur.Category[c] != "" {
+			buttons = []string{"Cancel", "Same as Photos", "Choose Folder…"}
+		}
+		button, err := choiceDialog(msg, buttons...)
+		if err != nil {
+			if !errors.Is(err, errCanceled) {
+				slog.Warn("folder dialog failed", "err", err)
+			}
+			return
+		}
+		if button == "Same as Photos" {
+			t.setFolders(cur.with(c, ""), c)
+			return
+		}
+	}
+	dir, err := chooseFolderFor(c, cur.forCategory(c))
 	if errors.Is(err, errCanceled) {
 		return
 	}
@@ -167,20 +209,28 @@ func (t *trayApp) changeFolder() {
 		err = os.MkdirAll(dir, 0o755)
 	}
 	if err != nil {
-		errorAlert("Could not change the upload folder", err)
+		errorAlert("Could not change the folder", err)
 		return
 	}
-	t.st.SetDir(dir)
-	t.cfg.UploadDir = dir
+	t.setFolders(cur.with(c, dir), c)
+}
+
+// setFolders switches the store to f and saves it to the config file.
+func (t *trayApp) setFolders(f folders, changed category) {
+	t.st.SetFolders(f)
+	t.cfg.setFolders(f)
 	if err := saveAppConfig(t.cfgPath, t.cfg); err != nil {
 		slog.Error("saving config", "path", t.cfgPath, "err", err)
 	}
-	slog.Info("upload folder changed", "folder", dir)
+	slog.Info("upload folder changed", "category", changed, "folder", f.describeFolder(changed))
 }
 
-func shortPath(p string) string {
-	if home, err := os.UserHomeDir(); err == nil && (p == home || strings.HasPrefix(p, home+string(filepath.Separator))) {
-		return "~" + strings.TrimPrefix(p, home)
+// sameFolders reports whether a and b route the categories identically.
+func sameFolders(a, b folders) bool {
+	for _, c := range categories {
+		if a.describeFolder(c) != b.describeFolder(c) {
+			return false
+		}
 	}
-	return p
+	return true
 }

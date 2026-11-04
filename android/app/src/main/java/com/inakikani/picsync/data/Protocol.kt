@@ -16,7 +16,15 @@ data class SavedFile(
     val size: Long,         // bytes the server received
     val sha256: String,     // hex SHA-256 of the bytes the server received
     val duplicate: Boolean, // identical content was already on the Mac
+    val folder: String = "",   // where the Mac saved it, e.g. "~/Documents/Phone" ("" = older server)
+    val category: String = "", // photos, videos, documents or other ("" = older server)
 )
+
+/** "Saved as X in ~/Folder" / "Already on the Mac as X in ~/Folder", for the share screen. */
+fun SavedFile.statusText(): String {
+    val where = if (folder.isNotEmpty()) " in $folder" else ""
+    return if (duplicate) "Already on the Mac as $name$where" else "Saved as $name$where"
+}
 
 /** Parses the first entry of an upload response. Throws [IllegalArgumentException] if malformed. */
 fun parseUploadResponse(body: String): SavedFile = try {
@@ -27,6 +35,8 @@ fun parseUploadResponse(body: String): SavedFile = try {
         size = f.getLong("size"),
         sha256 = f.getString("sha256"),
         duplicate = f.optBoolean("duplicate", false),
+        folder = f.optString("folder", ""),
+        category = f.optString("category", ""),
     )
 } catch (e: JSONException) {
     throw IllegalArgumentException("Unexpected server response", e)

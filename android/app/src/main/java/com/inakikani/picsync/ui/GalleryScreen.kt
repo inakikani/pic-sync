@@ -1,6 +1,7 @@
 package com.inakikani.picsync.ui
 
 import android.app.Activity
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,6 +86,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import com.inakikani.picsync.R
+import com.inakikani.picsync.ShareActivity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -160,6 +162,20 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
     val trashLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
         vm.onTrashResult(it.resultCode == Activity.RESULT_OK)
     }
+    // "Upload files…": any file from Android's picker (documents, downloads, Drive, …),
+    // sent with the share screen. The Mac puts each type in its own folder.
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        AppLog.i("upload files: ${uris.size} picked")
+        if (uris.isNotEmpty()) {
+            ctx.startActivity(
+                Intent(ctx, ShareActivity::class.java)
+                    .setAction(Intent.ACTION_SEND_MULTIPLE)
+                    .setType("*/*")
+                    .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            )
+        }
+    }
     var confirmTrash by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showFailures by remember { mutableStateOf(false) }
@@ -180,6 +196,9 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
                 title = { Text("pic-sync") },
                 subtitle = { Text(state.serverUrl.orEmpty()) },
                 actions = {
+                    IconButton(onClick = { pickFiles.launch(arrayOf("*/*")) }, shapes = IconButtonDefaults.shapes()) {
+                        Icon(painterResource(R.drawable.ic_upload_file), contentDescription = "Upload files")
+                    }
                     IconButton(onClick = { showSettings = true }, shapes = IconButtonDefaults.shapes()) {
                         Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
                     }

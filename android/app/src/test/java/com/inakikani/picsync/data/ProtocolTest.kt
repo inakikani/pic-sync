@@ -19,6 +19,19 @@ class ProtocolTest {
         assertEquals(SavedFile("IMG_1 (1).jpg", "IMG_1.jpg", 3, abcSha, true), f)
     }
 
+    @Test fun parsesFolderAndCategory() {
+        val f = parseUploadResponse(
+            """{"saved":[{"name":"a.pdf","size":1,"sha256":"00","category":"documents","folder":"~/Documents/Phone"}]}""",
+        )
+        assertEquals("documents", f.category)
+        assertEquals("Saved as a.pdf in ~/Documents/Phone", f.statusText())
+        assertEquals("Already on the Mac as a.pdf in ~/Documents/Phone", f.copy(duplicate = true).statusText())
+        // Older servers send neither.
+        val old = parseUploadResponse("""{"saved":[{"name":"a.jpg","size":1,"sha256":"00"}]}""")
+        assertEquals("", old.folder)
+        assertEquals("Saved as a.jpg", old.statusText())
+    }
+
     @Test fun duplicateDefaultsToFalse() {
         val f = parseUploadResponse("""{"saved":[{"name":"a.jpg","size":1,"sha256":"00"}]}""")
         assertFalse(f.duplicate)

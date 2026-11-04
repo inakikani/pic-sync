@@ -19,9 +19,10 @@ import com.inakikani.picsync.ui.ShareScreen
 import com.inakikani.picsync.ui.ShareViewModel
 
 /**
- * "pic-sync" in the Android share sheet (e.g. from Google Photos): uploads the
- * shared photos/videos to the Mac. Shared files can only be read while this
- * screen is open, so it stays open (screen on) until the upload is done.
+ * "pic-sync" in the Android share sheet (Google Photos, Files, Drive, …): uploads the
+ * shared files to the Mac. The gallery's "Upload files…" opens it too, with the
+ * picked files. Shared files can only be read while this screen is open, so it
+ * stays open (screen on) until the upload is done.
  */
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

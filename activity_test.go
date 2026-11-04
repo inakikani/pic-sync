@@ -182,14 +182,14 @@ func TestTrayIcon(t *testing.T) {
 func TestHashCacheDroppedOnFolderChange(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	st := newStore(a)
-	if _, err := st.save("one.jpg", strings.NewReader("first"), time.Time{}); err != nil {
+	if _, err := st.save("one.jpg", "", strings.NewReader("first"), time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(st.cache) != 1 {
 		t.Fatalf("cache has %d entries, want 1", len(st.cache))
 	}
 	st.SetDir(b)
-	if _, err := st.save("two.jpg", strings.NewReader("second"), time.Time{}); err != nil {
+	if _, err := st.save("two.jpg", "", strings.NewReader("second"), time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(st.cache) != 1 {

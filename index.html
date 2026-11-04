@@ -8,6 +8,7 @@
   body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 0 auto; padding: 1rem; }
   h1 { font-size: 1.4rem; }
   input, button { font-size: 1.1rem; width: 100%; margin: .5rem 0; }
+  label { display: block; font-weight: 600; margin-top: .8rem; }
   button { padding: .8rem; border: 0; border-radius: .5rem; background: #2563eb; color: #fff; }
   button:disabled { background: #94a3b8; }
   ul { list-style: none; padding: 0; font-size: .9rem; }
@@ -19,16 +20,22 @@
 </style>
 </head>
 <body>
-<h1>Upload photos</h1>
+<h1>Upload to your Mac</h1>
 <!-- Listing HEIC/HEIF explicitly tells iOS the page accepts Apple's formats, so it sends the
-     original photos instead of converting each one to JPEG (slow, and not the original file). -->
+     original photos instead of converting each one to JPEG (slow, and not the original file).
+     Other files get their own picker, so photos never go through one that iOS may convert. -->
+<label for="files">Photos and videos</label>
 <input id="files" type="file" multiple accept="image/*,video/*,image/heic,image/heif,.heic,.heif">
 <p class="hint">On iPhone, after tapping <b>Add</b>, iOS may take a moment to prepare large selections or photos stored in iCloud.</p>
+<label for="other">Other files (documents, PDFs, …)</label>
+<input id="other" type="file" multiple>
+<p class="hint">Your Mac saves each type of file to its own folder.</p>
 <button id="go" disabled>Upload</button>
 <p id="summary"></p>
 <ul id="list"></ul>
 <script>
-const input = document.getElementById('files');
+const pickers = [document.getElementById('files'), document.getElementById('other')];
+let selected = [];        // files from the picker used last
 const btn = document.getElementById('go');
 const list = document.getElementById('list');
 const summary = document.getElementById('summary');
@@ -48,10 +55,10 @@ report('page opened', { touch: navigator.maxTouchPoints > 0 });
 let pickerOpenedAt = 0;   // when the picker was opened (0 = not open)
 let gotResult = false;    // change or cancel arrived since then
 
-input.addEventListener('click', () => {
+for (const input of pickers) input.addEventListener('click', () => {
   pickerOpenedAt = Date.now();
   gotResult = false;
-  report('picker opened');
+  report('picker opened', { picker: input.id });
 });
 
 // When the page gets focus back but the picker hasn't delivered anything yet, the
@@ -67,14 +74,16 @@ window.addEventListener('focus', () => {
   }, 1500);
 });
 
-input.addEventListener('cancel', () => {
+for (const input of pickers) input.addEventListener('cancel', () => {
   gotResult = true;
   pickerOpenedAt = 0;
-  report('picker cancelled');
+  report('picker cancelled', { picker: input.id });
 });
 
-input.addEventListener('change', () => {
-  const files = Array.from(input.files);
+for (const input of pickers) input.addEventListener('change', () => {
+  // One selection at a time: picking in one picker replaces the other's files.
+  for (const p of pickers) if (p !== input) p.value = '';
+  const files = selected = Array.from(input.files);
   const seconds = pickerOpenedAt ? Math.round((Date.now() - pickerOpenedAt) / 1000) : null;
   gotResult = true;
   pickerOpenedAt = 0;
@@ -82,7 +91,7 @@ input.addEventListener('change', () => {
   list.innerHTML = '';
   if (files.length === 0) {
     summary.textContent = 'Your phone handed over no files. Try selecting fewer, or (on iPhone) Safari.';
-    report('picker returned nothing', { seconds });
+    report('picker returned nothing', { picker: input.id, seconds });
     return;
   }
   const types = {};
@@ -95,6 +104,7 @@ input.addEventListener('change', () => {
   }
   summary.textContent = `${files.length} file(s) selected` + (empty ? ` (${empty} empty: your phone didn't hand them over completely)` : '');
   report(empty ? 'picker returned files, some empty: error' : 'picker returned files', {
+    picker: input.id,
     count: files.length,
     mb: Math.round(bytes / 1e5) / 10,
     empty,
@@ -118,10 +128,14 @@ function uploadOne(file, statusEl) {
     };
     xhr.onload = () => {
       if (xhr.status === 200) {
-        let dup = null;
-        try { const f = JSON.parse(xhr.responseText).saved[0]; if (f.duplicate) dup = f.name; } catch {}
-        if (dup) { statusEl.textContent = '= already on Mac' + (dup !== file.name ? ` as ${dup}` : ''); statusEl.className = 'dup'; resolve('dup'); }
-        else { statusEl.textContent = '✓'; statusEl.className = 'ok'; resolve('ok'); }
+        let saved = {};
+        try { saved = JSON.parse(xhr.responseText).saved[0] || {}; } catch {}
+        const where = saved.folder ? ` in ${saved.folder}` : '';
+        if (saved.duplicate) {
+          statusEl.textContent = '= already on Mac' + (saved.name !== file.name ? ` as ${saved.name}` : '') + where;
+          statusEl.className = 'dup'; resolve('dup');
+        }
+        else { statusEl.textContent = '✓' + where; statusEl.className = 'ok'; resolve('ok'); }
       }
       else {
         let msg = 'error ' + xhr.status;
@@ -139,8 +153,9 @@ function uploadOne(file, statusEl) {
 }
 
 btn.addEventListener('click', async () => {
-  const files = Array.from(input.files);
-  btn.disabled = input.disabled = true;
+  const files = selected;
+  btn.disabled = true;
+  for (const p of pickers) p.disabled = true;
   list.innerHTML = '';
   const rows = files.map(f => {
     const li = document.createElement('li');
@@ -158,8 +173,8 @@ btn.addEventListener('click', async () => {
     (count.dup ? `, ${count.dup} already on Mac` : '') +
     (count.err ? `, ${count.err} failed` : '');
   report('upload batch done', count);
-  input.value = '';
-  input.disabled = false;
+  selected = [];
+  for (const p of pickers) { p.value = ''; p.disabled = false; }
 });
 </script>
 </body>

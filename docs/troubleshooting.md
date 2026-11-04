@@ -21,7 +21,7 @@ time=2026-11-02T14:00:01.204 level=INFO msg="==== pic-sync starting ====" versio
 time=2026-11-02T14:00:01.210 level=INFO msg="address for the phone" url=http://192.168.1.23:8080
 time=2026-11-02T14:00:01.210 level=INFO msg=listening addr=[::]:8080 qr_url=http://192.168.1.23:8080
 time=2026-11-02T14:02:10.551 level=INFO msg=request client=192.168.1.40 method=GET path=/api/info status=200 took=1ms agent="pic-sync-android/1.0 (1) (Android 17; Google Pixel 9)"
-time=2026-11-02T14:02:14.902 level=INFO msg=saved file=IMG_1234.jpg size="3.2 MB" took=1.1s speed="2.9 MB/s" client=192.168.1.40 sha256=2cf24dba5fb0 date="2024-07-14 18:30" date_from="file metadata"
+time=2026-11-02T14:02:14.902 level=INFO msg=saved file=IMG_1234.jpg size="3.2 MB" took=1.1s speed="2.9 MB/s" folder=~/Pictures/Phone client=192.168.1.40 sha256=2cf24dba5fb0 date="2024-07-14 18:30" date_from="file metadata"
 time=2026-11-02T14:02:14.903 level=INFO msg=request client=192.168.1.40 method=POST path=/upload status=200 took=1.1s received="3.2 MB" agent=…
 time=2026-11-02T14:02:20.117 level=INFO msg="duplicate, not stored (identical file already in the folder)" file=IMG_1234.jpg sent_as=IMG_1234(1).jpg …
 time=2026-11-02T14:03:41.006 level=WARN msg="upload failed" file=VID_0042.mp4 client=192.168.1.40 took=20s err="upload interrupted after 48.1 MB: unexpected EOF"
@@ -31,9 +31,10 @@ time=2026-11-02T14:05:00.000 level=ERROR msg="upload failed" file=IMG_2000.jpg �
 | Message | Meaning |
 |---------|---------|
 | `pic-sync starting` | What is running: commit, macOS, mode, config file, upload folder. Every run starts with this line. |
+| `folder` | At startup, where each type of file goes (e.g. `for="Documents: ~/Documents/Phone"`), one line each. |
 | `address for the phone` / `listening` | Every LAN address, and the one put in the QR code. |
 | `request` | Every HTTP request: phone IP, path, status, size received, time and user agent. The agent tells you whether it was the Android app (`pic-sync-android/…`) or a browser. |
-| `saved` | A stored file: the name on disk, `sent_as` if it was renamed to avoid overwriting, size, speed, the first 12 hex digits of its SHA-256, and where its date came from (`file metadata`, `phone`, or `none`). |
+| `saved` | A stored file: the name on disk, `sent_as` if it was renamed to avoid overwriting, size, speed, the `folder` it went to, the first 12 hex digits of its SHA-256, and where its date came from (`file metadata`, `phone`, or `none`). |
 | `duplicate, not stored` | Identical content was already in the folder under `file`. Nothing new was written. |
 | `upload failed` (WARN, status 400) | The request was bad, or the connection broke or stalled (no data for 30 s, `i/o timeout`) mid-file. Nothing is saved, and no partial file is left behind. |
 | `request rejected: sent by another website` (status 403) | A web page from another site tried to upload through a browser. See *Uploads fail with 403* below. |
@@ -90,7 +91,8 @@ On the phone:
 - The browser said the upload came from a different website than the pic-sync page. Open the page by the address pic-sync shows (scan the QR code) and upload from there. Don't use pages saved to disk, other sites, or a proxy or extension that rewrites the address.
 
 **ERROR `upload failed` / *the Mac couldn't save it***
-- **Folder removed or disk ejected:** choose the folder again (menu bar → **Change folder…**, or fix `upload_dir`).
+- **Folder removed or disk ejected:** choose the folder again (menu bar → **Folders**, or fix `upload_dir` / `folders` / `extensions` in the config). pic-sync doesn't recreate a folder that disappears while it runs, so files never end up on the wrong disk.
+- **A file went to an unexpected folder:** the `saved` line shows its `folder`. Types are decided by extension; an extension rule in `extensions` wins over the type ([README](../README.md#file-types-and-folders)).
 - **Disk full:** free space. The error says `no space left on device`.
 - **Permission denied:** the folder isn't writable. For folders in Desktop, Documents or Downloads, macOS may also need to allow pic-sync access (System Settings → Privacy & Security → Files and Folders).
 

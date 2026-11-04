@@ -17,11 +17,13 @@ import (
 
 // savedFile describes the outcome of one uploaded file.
 type savedFile struct {
-	Name      string `json:"name"`      // file name in upload_dir (existing file if Duplicate)
+	Name      string `json:"name"`      // file name in Folder (existing file if Duplicate)
 	Original  string `json:"original"`  // name sent by the client
 	Size      int64  `json:"size"`      // bytes received
 	SHA256    string `json:"sha256"`    // hex SHA-256 of the received bytes
 	Duplicate bool   `json:"duplicate"` // identical content already existed; nothing new written
+	Category  string `json:"category"`  // photos, videos, documents or other
+	Folder    string `json:"folder"`    // where it was saved, "~/…" for folders under the home folder
 
 	Date       time.Time `json:"-"` // date given to the saved file (zero: upload time kept)
 	DateSource string    `json:"-"` // "file" (EXIF/video header), "client", or "" (none)
@@ -54,19 +56,19 @@ func (s *srcReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// store writes uploads into dir and detects content duplicates.
+// store writes uploads into their folder (see folders.route) and detects
+// content duplicates within that folder.
 //
 // Duplicate detection is by full SHA-256, computed while the upload streams to
 // disk. Only existing files of exactly the same size are compared, and their
 // hashes are cached (invalidated by size/mtime changes), so in the common case
 // nothing extra is hashed at all.
 type store struct {
-	dirMu    sync.RWMutex
-	dir      string     // upload folder; can change at runtime (menu bar "Change folder…")
-	mu       sync.Mutex // serialises duplicate check + final rename; guards cache*
-	cache    map[string]hashEntry
-	cacheDir string // folder the cache entries belong to
-	act      *activity
+	dirMu sync.RWMutex
+	dirs  folders    // where uploads go; can change at runtime (menu bar "Folders")
+	mu    sync.Mutex // serialises duplicate check + final rename; guards cache
+	cache map[string]hashEntry
+	act   *activity
 
 	tmpMu sync.Mutex
 	temps map[string]struct{} // temp files of uploads in progress, removed on shutdown
@@ -82,33 +84,57 @@ type hashEntry struct {
 	sum     string
 }
 
+// newStore saves everything to dir; use SetFolders for per-category folders.
 func newStore(dir string) *store {
-	return &store{dir: dir, cache: map[string]hashEntry{}, act: newActivity(), temps: map[string]struct{}{}}
+	return &store{dirs: folders{Photos: dir}, cache: map[string]hashEntry{}, act: newActivity(), temps: map[string]struct{}{}}
 }
 
-// Dir returns the current upload folder.
-func (s *store) Dir() string {
+// Dir returns the photos folder (upload_dir).
+func (s *store) Dir() string { return s.Folders().Photos }
+
+// Folders returns where uploads currently go.
+func (s *store) Folders() folders {
 	s.dirMu.RLock()
 	defer s.dirMu.RUnlock()
-	return s.dir
+	return s.dirs
 }
 
-// SetDir switches the upload folder; uploads already in progress finish in the old one.
-func (s *store) SetDir(dir string) {
+// SetDir switches the photos folder (and every category that uses it).
+func (s *store) SetDir(dir string) { s.SetFolders(s.Folders().with(catPhotos, dir)) }
+
+// SetFolders switches where uploads go; uploads already in progress finish in
+// their old folder. Cached hashes of folders no longer used are dropped.
+func (s *store) SetFolders(f folders) {
 	s.dirMu.Lock()
-	s.dir = dir
+	s.dirs = f
 	s.dirMu.Unlock()
+
+	keep := map[string]bool{}
+	for _, d := range f.all() {
+		keep[d] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for p := range s.cache {
+		if !keep[filepath.Dir(p)] {
+			delete(s.cache, p)
+		}
+	}
 }
 
-// save stores one upload. clientTime is the file date the client sent (zero if
-// none); it's used as the file's modification time when the file itself has no
-// capture date (see takenTime).
-func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (savedFile, error) {
+// save stores one upload in the folder for its type. contentType is the type the
+// client sent with the file (used when the extension doesn't say). clientTime is
+// the file date the client sent (zero if none); it's used as the file's
+// modification time when the file itself has no capture date (see takenTime).
+func (s *store) save(rawName, contentType string, src io.Reader, clientTime time.Time) (savedFile, error) {
 	name, err := sanitizeName(rawName)
 	if err != nil {
 		return savedFile{}, clientError{err}
 	}
-	dir := s.Dir() // fixed for this upload even if the folder is changed meanwhile
+	// Fixed for this upload even if the folders are changed meanwhile. Folders are
+	// created at startup and when changed, never here: a folder that disappeared
+	// (e.g. on an ejected disk) is an error, not something to recreate elsewhere.
+	dir, cat, _ := s.Folders().route(name, contentType)
 
 	// Stream to a hidden temp file (hashing on the way) so a broken upload
 	// never appears under a real name.
@@ -135,11 +161,10 @@ func (s *store) save(rawName string, src io.Reader, clientTime time.Time) (saved
 	if err := tmp.Close(); err != nil {
 		return savedFile{}, err
 	}
-	res := savedFile{Original: name, Size: size, SHA256: hex.EncodeToString(h.Sum(nil))}
+	res := savedFile{Original: name, Size: size, SHA256: hex.EncodeToString(h.Sum(nil)), Category: string(cat), Folder: shortPath(dir)}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.useCacheFor(dir)
 
 	existing, err := s.findDuplicate(dir, size, res.SHA256)
 	if err != nil {
@@ -241,14 +266,6 @@ func removeStaleTemps(dir string, now time.Time) {
 	}
 	if removed > 0 {
 		slog.Info("removed leftover temp files from an interrupted run", "count", removed, "folder", dir)
-	}
-}
-
-// useCacheFor drops the hash cache when uploads move to another folder, so
-// entries for the old folder aren't kept for the rest of the run. Must hold s.mu.
-func (s *store) useCacheFor(dir string) {
-	if dir != s.cacheDir {
-		s.cache, s.cacheDir = map[string]hashEntry{}, dir
 	}
 }
 

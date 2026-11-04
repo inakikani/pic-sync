@@ -46,8 +46,9 @@
             </intent-filter>
         </activity>
 
-        <!-- "pic-sync" in the share sheet (Google Photos, Files, …): sends the shared
-             photos/videos to the Mac. -->
+        <!-- "pic-sync" in the share sheet (Google Photos, Files, Drive, …): sends the shared
+             files to the Mac, which saves each type to its own folder. Shares without a
+             file (plain text, links) show "Nothing to send". -->
         <activity
             android:name=".ShareActivity"
             android:exported="true"
@@ -55,14 +56,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="video/*" />
+                <data android:mimeType="*/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="video/*" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
     </application>

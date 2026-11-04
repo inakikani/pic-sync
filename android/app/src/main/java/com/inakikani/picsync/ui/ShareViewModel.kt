@@ -14,6 +14,7 @@ import com.inakikani.picsync.data.MediaRepository
 import com.inakikani.picsync.data.ServerClient
 import com.inakikani.picsync.data.UploadRecord
 import com.inakikani.picsync.data.UploadStore
+import com.inakikani.picsync.data.statusText
 import com.inakikani.picsync.data.explain
 import com.inakikani.picsync.data.matchShared
 import kotlinx.coroutines.CancellationException
@@ -27,8 +28,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
-/** A file shared to pic-sync from another app (e.g. Google Photos). */
-data class SharedItem(val uri: Uri, val name: String, val size: Long?, val mimeType: String, val takenAt: Long)
+/** A file shared to pic-sync from another app (e.g. Google Photos), or picked with "Upload files…". */
+data class SharedItem(val uri: Uri, val name: String, val size: Long?, val mimeType: String, val takenAt: Long) {
+    /** Photos and videos can be in the phone's library (and so be trashed later); other files can't. */
+    val isMedia get() = mimeType.startsWith("image/") || mimeType.startsWith("video/")
+}
 
 enum class ShareStatus { WAITING, SENDING, SAVED, DUPLICATE, FAILED }
 
@@ -36,7 +40,7 @@ data class ShareRow(
     val item: SharedItem,
     val status: ShareStatus = ShareStatus.WAITING,
     val detail: String? = null,  // "Saved as …", the error, …
-    val onPhone: Boolean? = null, // matched to a photo in the phone's library (can be trashed later)
+    val onPhone: Boolean? = null, // matched to a photo in the phone's library (can be trashed later); null: not looked up
 )
 
 data class ShareState(
@@ -152,7 +156,10 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
                 return
             }
             // Link it to the phone's own photo, so the gallery can trash it later.
-            val match = if (!canMatch) {
+            // Other files (documents, …) are never in the photo library: don't look.
+            val match = if (!item.isMedia) {
+                null to "not a photo or video"
+            } else if (!canMatch) {
                 null to "no photo access, so it can't be found in the phone's library"
             } else {
                 withContext(Dispatchers.IO) {
@@ -180,14 +187,15 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
             AppLog.i(
                 "share: ${item.name} (${result.local.bytes} bytes, $ms ms) " +
                     (if (result.saved.duplicate) "already on Mac as ${result.saved.name}" else "saved as ${result.saved.name}") +
+                    " in ${result.saved.folder.ifEmpty { "?" }}" +
                     ", verified; phone library: " +
                     (phoneItem?.let { "matched id ${it.id} (${it.name})" } ?: "no match: ${match.second}"),
             )
             setRow(i) {
                 it.copy(
                     status = if (result.saved.duplicate) ShareStatus.DUPLICATE else ShareStatus.SAVED,
-                    detail = if (result.saved.duplicate) "Already on the Mac as ${result.saved.name}" else "Saved as ${result.saved.name}",
-                    onPhone = phoneItem != null,
+                    detail = result.saved.statusText(),
+                    onPhone = if (item.isMedia) phoneItem != null else null,
                 )
             }
         } catch (e: CancellationException) {

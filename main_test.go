@@ -191,7 +191,7 @@ func TestRenderQR(t *testing.T) {
 
 func TestStatusPageLocalOnly(t *testing.T) {
 	mux := newMux(t.TempDir())
-	addStatusPage(mux, func() string { return "/photos" }, "http://192.168.1.5:8080")
+	addStatusPage(mux, func() []string { return []string{"Photos: /photos"} }, "http://192.168.1.5:8080")
 	for _, tc := range []struct {
 		path, remote string
 		want         int
@@ -262,9 +262,11 @@ func decodeSaved(t *testing.T, rec *httptest.ResponseRecorder) []savedFile {
 
 func TestResponseHasHashAndSize(t *testing.T) {
 	body := "some photo bytes"
-	got := decodeSaved(t, upload(t, t.TempDir(), upFile{"a.jpg", body}))
+	dir := t.TempDir()
+	got := decodeSaved(t, upload(t, dir, upFile{"a.jpg", body}))
 	sum := sha256.Sum256([]byte(body))
-	want := savedFile{Name: "a.jpg", Original: "a.jpg", Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:])}
+	want := savedFile{Name: "a.jpg", Original: "a.jpg", Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:]),
+		Category: "photos", Folder: shortPath(dir)}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
