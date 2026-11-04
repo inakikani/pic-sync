@@ -45,17 +45,28 @@ func (t *trayApp) onReady() {
 	mBrowser := systray.AddMenuItem("Open QR page in browser", "A larger QR code in your browser")
 	systray.AddSeparator()
 	mFolder := systray.AddMenuItem("", "Open the photos folder in Finder")
-	// "Folders" submenu: one entry per category; clicking one changes its folder.
+	// "Folders" submenu: one entry per category, each with its own submenu. Every
+	// action is a single click: at most one window (the folder picker), since each
+	// osascript window takes a moment to start.
 	mFolders := systray.AddMenuItem("Folders", "Choose where each type of file is saved")
 	catItems := make([]*systray.MenuItem, len(categories))
-	catClicks := make(chan category, 1)
-	for i, c := range categories {
-		catItems[i] = mFolders.AddSubMenuItem("", "Change where "+strings.ToLower(c.label())+" are saved")
-		go func(item *systray.MenuItem, c category) {
+	samePhotos := make([]*systray.MenuItem, len(categories)) // nil for photos
+	clicks := make(chan folderClick, 1)
+	forward := func(item *systray.MenuItem, click folderClick) {
+		go func() {
 			for range item.ClickedCh {
-				catClicks <- c
+				clicks <- click
 			}
-		}(catItems[i], c)
+		}()
+	}
+	for i, c := range categories {
+		catItems[i] = mFolders.AddSubMenuItem("", "Where "+strings.ToLower(c.label())+" are saved")
+		forward(catItems[i].AddSubMenuItem("Choose Folder…", "Pick a folder for "+strings.ToLower(c.label())), folderClick{c, folderChoose})
+		if c != catPhotos {
+			samePhotos[i] = catItems[i].AddSubMenuItem("Same as Photos", "Save "+strings.ToLower(c.label())+" in the photos folder")
+			forward(samePhotos[i], folderClick{c, folderSameAsPhotos})
+		}
+		forward(catItems[i].AddSubMenuItem("Open in Finder", ""), folderClick{c, folderOpen})
 	}
 	// Extension rules are only edited in config.json; list them for reference.
 	if exts := t.st.Folders().extList(); len(exts) > 0 {
@@ -101,6 +112,13 @@ func (t *trayApp) onReady() {
 			mFolder.SetTitle("Open folder: " + shortPath(f.Photos))
 			for i, c := range categories {
 				catItems[i].SetTitle(c.label() + ": " + f.describeFolder(c))
+				if samePhotos[i] != nil {
+					if f.Category[c] != "" {
+						samePhotos[i].Enable()
+					} else {
+						samePhotos[i].Disable() // already in the photos folder
+					}
+				}
 			}
 		}
 		last = s
@@ -128,14 +146,22 @@ func (t *trayApp) onReady() {
 				openPath(t.st.Dir())
 			case <-mLog.ClickedCh:
 				openPath(logFilePath)
-			case c := <-catClicks:
-				go func() {
-					t.changeFolder(c)
-					select {
-					case changed <- struct{}{}:
-					default:
-					}
-				}()
+			case click := <-clicks:
+				switch click.action {
+				case folderOpen:
+					openPath(t.st.Folders().forCategory(click.c))
+				case folderSameAsPhotos:
+					t.setFolders(t.st.Folders().with(click.c, ""), click.c)
+					refresh()
+				case folderChoose:
+					go func() {
+						t.changeFolder(click.c)
+						select {
+						case changed <- struct{}{}:
+						default:
+						}
+					}()
+				}
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 				return
@@ -170,37 +196,28 @@ func (t *trayApp) showQR() {
 	}
 }
 
-// changeFolder lets the user pick a new folder for category c; new uploads go
-// there. Categories other than photos can also go back to the photos folder.
+// folderClick is a click in a category's submenu under "Folders".
+type folderClick struct {
+	c      category
+	action int // folderChoose, folderSameAsPhotos or folderOpen
+}
+
+const (
+	folderChoose = iota
+	folderSameAsPhotos
+	folderOpen
+)
+
+// changeFolder lets the user pick a new folder for category c; new uploads go there.
 func (t *trayApp) changeFolder(c category) {
 	if !t.busy.CompareAndSwap(false, true) {
 		return
 	}
 	defer t.busy.Store(false)
 
-	cur := t.st.Folders()
-	if c != catPhotos {
-		msg := fmt.Sprintf("%s are saved to:\n%s", c.label(), cur.describeFolder(c))
-		if c == catOther {
-			msg = fmt.Sprintf("Other files (not photos, videos or documents) are saved to:\n%s", cur.describeFolder(c))
-		}
-		buttons := []string{"Cancel", "Choose Folder…"}
-		if cur.Category[c] != "" {
-			buttons = []string{"Cancel", "Same as Photos", "Choose Folder…"}
-		}
-		button, err := choiceDialog(msg, buttons...)
-		if err != nil {
-			if !errors.Is(err, errCanceled) {
-				slog.Warn("folder dialog failed", "err", err)
-			}
-			return
-		}
-		if button == "Same as Photos" {
-			t.setFolders(cur.with(c, ""), c)
-			return
-		}
-	}
-	dir, err := chooseFolderFor(c, cur.forCategory(c))
+	start := time.Now()
+	dir, err := chooseFolderFor(c, t.st.Folders().forCategory(c))
+	slog.Info("folder picker closed", "category", c, "took", roundDur(time.Since(start)), "canceled", errors.Is(err, errCanceled))
 	if errors.Is(err, errCanceled) {
 		return
 	}
@@ -212,7 +229,8 @@ func (t *trayApp) changeFolder(c category) {
 		errorAlert("Could not change the folder", err)
 		return
 	}
-	t.setFolders(cur.with(c, dir), c)
+	// Read the folders again: they may have changed while the picker was open.
+	t.setFolders(t.st.Folders().with(c, dir), c)
 }
 
 // setFolders switches the store to f and saves it to the config file.

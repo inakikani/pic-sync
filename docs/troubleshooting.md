@@ -43,6 +43,7 @@ time=2026-11-02T14:05:00.000 level=ERROR msg="upload failed" file=IMG_2000.jpg �
 | `page: …` (e.g. `page: picker returned files count=3 types="image/heic×3"`) | What the upload page's file picker did in the phone's browser: opened, files handed over (count, size, types, seconds), cancelled, upload errors. Used to diagnose browser-side problems, e.g. on iPhone. |
 | `upload failed` (ERROR, status 500) | The Mac couldn't write the file: folder missing or not writable, disk full. The Android app shows *the Mac couldn't save it: …* |
 | `upload folder changed`, `saving config`, `QR window unavailable…`, `stopped by user` | Mac app events. |
+| `folder picker closed` | The **Folders → Choose Folder…** window closed: `took` is how long it was open, `canceled` whether a folder was chosen. With `-debug`, `osascript took=…` lines time every Mac window, including the time it takes to appear. |
 
 ## What the Android app logs
 

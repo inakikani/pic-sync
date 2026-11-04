@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 func inAppBundle() bool {
@@ -311,7 +312,10 @@ func runOsascript(scriptArgs []string, args ...string) (string, error) {
 	cmd := exec.Command("osascript", append(scriptArgs, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	start := time.Now()
 	out, err := cmd.Output()
+	// Includes the time the window was open; with a quick cancel it shows the start-up cost.
+	slog.Debug("osascript", "took", roundDur(time.Since(start)), "err", err)
 	if err != nil {
 		if strings.Contains(stderr.String(), "-128") { // user canceled
 			return "", errCanceled
@@ -341,16 +345,6 @@ end run`, prompt, defaultDir)
 	activate
 	return POSIX path of (choose folder with prompt (item 1 of argv))
 end run`, prompt)
-}
-
-// choiceDialog shows msg with the given buttons (the last one is the default)
-// and returns the button pressed. A button named "Cancel" returns errCanceled.
-func choiceDialog(msg string, buttons ...string) (string, error) {
-	return osascript(`on run argv
-	activate
-	set btns to items 2 thru -1 of argv
-	return button returned of (display dialog (item 1 of argv) with title "pic-sync" buttons btns default button (count of btns) cancel button "Cancel")
-end run`, append([]string{msg}, buttons...)...)
 }
 
 // runningDialog blocks until the user presses a button and returns its name.
