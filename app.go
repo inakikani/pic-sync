@@ -226,13 +226,10 @@ function run(argv) {
   // icon) app before its windows can come to the front.
   var nsapp = $.NSApplication.sharedApplication;
   nsapp.setActivationPolicy(1); // NSApplicationActivationPolicyAccessory
-  // Bring osascript forward the same way AppleScript's "activate" does (this is what
-  // makes the plain dialogs appear); the AppKit call alone is ignored on macOS 14+.
-  var self = Application.currentApplication();
-  self.includeStandardAdditions = true;
-  self.activate();
+  // Come forward on macOS 12-13 (14+ ignores this call). No Standard Additions
+  // activate(): it works on 14+ but waits about 2 s first (see runOsascript).
   nsapp.activateIgnoringOtherApps(true);
-  // Even if activation is refused, float above normal windows so it can't hide.
+  // Float above normal windows, so it shows even when it isn't activated.
   alert.layout;
   alert.window.setLevel(3); // NSFloatingWindowLevel
   alert.window.center;
@@ -310,6 +307,11 @@ func osascript(script string, args ...string) (string, error) {
 	return runOsascript([]string{"-e", script}, args...)
 }
 
+// runOsascript runs every script pic-sync shows a window with. The scripts
+// deliberately don't "activate": pic-sync is a menu bar app, never the frontmost
+// one, and from the background "activate" took about 2 s before a window appeared
+// (3.1 s for the folder picker, 0.7 s without it). The folder picker was checked
+// to come to the front without it; the other dialogs are the same kind.
 func runOsascript(scriptArgs []string, args ...string) (string, error) {
 	cmd := exec.Command("osascript", append(scriptArgs, args...)...)
 	var stderr bytes.Buffer
@@ -331,10 +333,7 @@ func chooseFolder(defaultDir string) (string, error) {
 	return chooseFolderFor(catPhotos, defaultDir)
 }
 
-// chooseFolderFor asks where files of category c should be saved. The scripts
-// deliberately don't "activate": pic-sync is a menu bar app, never the frontmost
-// one, and from the background "activate" took about 2 s before the picker
-// appeared (0.7 s without it). Without it the picker still shows in front.
+// chooseFolderFor asks where files of category c should be saved.
 func chooseFolderFor(c category, defaultDir string) (string, error) {
 	prompt := "Where should " + strings.ToLower(c.label()) + " from your phone be saved?"
 	if c == catOther {
@@ -354,7 +353,6 @@ end run`, prompt)
 func runningDialog(dirs, url string) string {
 	msg := fmt.Sprintf("pic-sync is running.\n\nOn your phone, open:\n%s\n\nFiles are saved to:\n%s", url, dirs)
 	out, err := osascript(`on run argv
-	activate
 	return button returned of (display dialog (item 1 of argv) with title "pic-sync" buttons {"Show QR code", "Stop"} default button "Show QR code")
 end run`, msg)
 	if err != nil {
@@ -373,7 +371,6 @@ func fatalAlert(title string, err error) {
 func errorAlert(title string, err error) {
 	slog.Error(title, "err", err)
 	osascript(`on run argv
-	activate
 	display alert (item 1 of argv) message (item 2 of argv) as critical
 end run`, title, err.Error())
 }
