@@ -85,7 +85,7 @@ On the phone:
 4. ***listening on :8080 (is another pic-sync already running?)*:** quit the other instance, or set another `listen` port.
 
 **Uploads stop halfway** (`upload interrupted` in the Mac log, *connection dropped* on the phone)
-- The phone locked or switched networks, or the browser went to the background. The Android app keeps the screen on while uploading; in a browser, keep the page open and the screen on.
+- The phone locked or switched networks, or the browser went to the background. The Android app keeps uploading in the background (a notification shows the progress) unless it's removed from Recents; in a browser, keep the page open and the screen on.
 - Nothing partial is saved. Upload the same files again: files that did arrive are reported as *already on Mac*.
 
 **Uploads fail with 403 / *cross-origin request rejected***

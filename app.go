@@ -99,6 +99,8 @@ func runApp(cfgPath string, debugLog bool) {
 	statusURL := fmt.Sprintf("http://localhost:%d/status", port)
 
 	st := newStore(cfg.UploadDir)
+	st.awake = newAwake(awakeIdle) // caffeinate also exits with us on the os.Exit paths
+	defer st.awake.close()
 	dirs, _ := cfg.folders() // checked by startListening
 	st.SetFolders(dirs)
 	mux := newStoreMux(st)

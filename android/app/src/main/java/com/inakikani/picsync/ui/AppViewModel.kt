@@ -15,12 +15,14 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.inakikani.picsync.UploadService
 import com.inakikani.picsync.data.Album
 import com.inakikani.picsync.data.AppLog
 import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
 import com.inakikani.picsync.data.MediaRepository
 import com.inakikani.picsync.data.Opened
+import com.inakikani.picsync.data.ProgressSteps
 import com.inakikani.picsync.data.ServerClient
 import com.inakikani.picsync.data.Settings
 import com.inakikani.picsync.data.UploadRecord
@@ -177,7 +179,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var uploadJob: Job? = null
-    @Volatile private var lastReported = -1f
     private var pendingTrash = 0
     private var pendingSkipped = 0
     private var pendingScope = ""
@@ -327,6 +328,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (items.isEmpty()) return
 
         AppLog.i("upload: ${items.size} files, ${mb(items.sumOf { it.size })} to $url")
+        // Keeps the upload going when the user switches apps or the screen turns off.
+        val background = UploadService.begin(getApplication<Application>(), "Uploading to the Mac", ::cancelUpload)
         uploadJob = viewModelScope.launch {
             val client = ServerClient(url, userAgent)
             val batchStart = System.nanoTime()
@@ -335,14 +338,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             var failed = 0
             var firstError: String? = null
             var cancelled = false
+            val steps = ProgressSteps()
             try {
                 for ((i, item) in items.withIndex()) {
-                    lastReported = -1f
+                    steps.reset()
                     _uploadFraction.value = 0f
                     _state.update { it.copy(upload = UploadProgress(i, items.size, item.id)) }
+                    background.progress(i, items.size, item.name, 0f)
                     val fileStart = System.nanoTime()
                     try {
-                        val (result, opened) = uploadOne(client, item) { sent -> reportProgress(item, sent) }
+                        val (result, opened) = uploadOne(client, item) { sent ->
+                            val f = if (item.size > 0) (sent.toFloat() / item.size).coerceIn(0f, 1f) else 0f
+                            if (steps.next(f)) {
+                                _uploadFraction.value = f
+                                background.progress(i, items.size, item.name, f)
+                            }
+                        }
                         val took = ms(fileStart)
                         val where = "${item.name} (id ${item.id}, ${mb(result.local.bytes)}, ${took} ms" +
                             "${speed(result.local.bytes, took)})"
@@ -405,6 +416,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 AppLog.i("upload: done in ${ms(batchStart) / 1000} s: $summary")
                 _state.update { it.copy(upload = null, message = summary) }
             }
+        }.also { job ->
+            // Not in finally: that doesn't run if the job is cancelled before it starts.
+            job.invokeOnCompletion { background.end() }
         }
     }
 
@@ -426,13 +440,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             result to opened
         }
-
-    private fun reportProgress(item: MediaItem, sent: Long) {
-        val f = if (item.size > 0) (sent.toFloat() / item.size).coerceIn(0f, 1f) else 0f
-        if (f - lastReported < 0.01f && f < 1f) return // throttle UI updates to ~1% steps
-        lastReported = f
-        _uploadFraction.value = f
-    }
 
     // ---- clean up ----
 

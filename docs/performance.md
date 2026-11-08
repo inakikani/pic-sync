@@ -32,6 +32,7 @@ These are the rules behind the current performance, and the mistakes that caused
 ### Threads and I/O
 - **Nothing blocking on the main thread:** no MediaStore queries, SQLite (`UploadStore`), file reads, hashing or network. Use `Dispatchers.IO`, or the thumbnail dispatcher, inside the view model. Building diagnostics reads the log file, so it runs off the main thread (`shareDiagnosticsAsync`).
 - **Stream uploads, never buffer them:** chunked streaming (`setChunkedStreamingMode`), 64 KB buffers, hashing on the way (`copyHashing`). A video must never sit in memory as a whole.
+- **Throttle progress with `ProgressSteps`.** The upload reports every 64 KB written; the progress bars and the background notification (`UploadTasks.Task.progress`) get ~1% steps. `UploadService` redraws its notification at most once a second; Android drops faster updates anyway.
 - **Logging (`AppLog`) is asynchronous** (one background writer) and capped at 256 KB plus one previous file. Don't log in per-frame or per-progress-tick paths. Log per file and per batch.
 
 ### Animation (Material 3 Expressive)

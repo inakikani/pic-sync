@@ -125,6 +125,8 @@ The Mac app's **Folders** menu changes `upload_dir` and `folders`. Extension rul
 - **Filenames are sanitised.** Directory parts are stripped and dot names rejected.
 - **No authentication.** Anyone on the LAN can upload while it runs, so only use it on trusted networks. Cross-site requests from other web pages are rejected with 403.
 
+- **The Mac stays awake while uploading,** and for 5 minutes after the last upload, so a batch isn't cut off by sleep. After that it can sleep as usual. The display can still turn off, and closing the lid still puts the Mac to sleep.
+
 On first run macOS may ask to allow incoming connections. Choose **Allow**.
 
 ## Android app
@@ -136,18 +138,20 @@ On first run macOS may ask to allow incoming connections. Choose **Allow**.
 **Use:**
 1. Start pic-sync on the Mac, then tap **Scan QR code** (or type the address).
 2. Optionally pick an **album** and switch between **All / To upload / Uploaded**. The **filters** button narrows by type, date taken and minimum size. Only on-device albums appear, not cloud-only Google Photos albums.
-3. Select photos (or **Select not uploaded**, or **Select N** on a month header) and tap **Upload**. The screen stays on while uploading.
+3. Select photos (or **Select not uploaded**, or **Select N** on a month header) and tap **Upload**.
 4. Tap **Move N uploaded to trash**. This applies to the current album and filters. Android asks once per batch, and trashed items are recoverable for 30 days.
 
 The grid is grouped by month, newest first. Tap a thumbnail's full-screen button to view it. Swipe to browse, pinch or double-tap to zoom, and tap to toggle the info bar. **Long-press** a photo to skip it. Skipped photos are never selected, uploaded or trashed, and this is remembered across restarts.
 
-**Sharing from other apps:** **Share → pic-sync** sends any file to the last Mac (scanning first if there is none). **Upload files** in the app does the same with files picked from Android's file picker. Keep the screen open until it's done; it shows which Mac folder each file went to. Cloud-only Google Photos items work too. Each verified photo or video is matched to the phone's library by size and SHA-256 so it can be trashed later. Unmatched ones (cloud-only or changed by Google Photos) and other files are never trashed.
+**Sharing from other apps:** **Share → pic-sync** sends any file to the last Mac (scanning first if there is none). **Upload files** in the app does the same with files picked from Android's file picker. You can switch to other apps meanwhile (see **Background uploads**); the screen shows which Mac folder each file went to. Cloud-only Google Photos items work too. Each verified photo or video is matched to the phone's library by size and SHA-256 so it can be trashed later. Unmatched ones (cloud-only or changed by Google Photos) and other files are never trashed.
+
+**Background uploads:** uploads and shares keep going when you switch to another app or the screen turns off. A notification shows the progress and has **Cancel**. Removing pic-sync (or the share screen) from Recents stops them. Android 15+ limits this kind of background work to about 6 hours a day; past that, uploads continue only while pic-sync is on screen.
 
 **Safety:** a photo is only offered for trashing if the server's size and SHA-256 matched what the phone sent. Photos edited after upload are re-hashed and skipped if they changed.
 
 **Other devices:** **Settings → Show QR code for the upload page** shows the Mac's address so another device on the Wi-Fi can upload from its browser. The page has one picker for photos and videos and another for other files.
 
-**Permissions:** photos and videos (limited access works) with location, and on Android 17 **Nearby devices / local network**. Optionally grant **Media management** to skip the system confirmation when trashing. The app then confirms itself.
+**Permissions:** photos and videos (limited access works) with location, and on Android 17 **Nearby devices / local network**. **Notifications** is asked for on the first upload, for the progress notification; uploads work without it. Optionally grant **Media management** to skip the system confirmation when trashing. The app then confirms itself.
 
 ## Logs and troubleshooting
 

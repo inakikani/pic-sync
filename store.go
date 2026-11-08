@@ -69,6 +69,7 @@ type store struct {
 	mu    sync.Mutex // serialises duplicate check + final rename; guards cache
 	cache map[string]hashEntry
 	act   *activity
+	awake *awake // keeps the Mac awake while uploading; nil in tests
 
 	tmpMu sync.Mutex
 	temps map[string]struct{} // temp files of uploads in progress, removed on shutdown

@@ -21,7 +21,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -34,7 +33,6 @@ import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inakikani.picsync.MainActivity
@@ -51,15 +49,9 @@ fun ShareScreen(vm: ShareViewModel, url: String, onDone: () -> Unit) {
     val gate = rememberLocalNetworkGate {
         vm.failToStart("pic-sync needs the Nearby devices (local network) permission to reach your Mac")
     }
+    val askNotifications = rememberNotificationRequest()
     LaunchedEffect(state.loaded, url) {
-        if (state.loaded && state.rows.isNotEmpty()) gate { vm.start(url) }
-    }
-
-    // Shared files can only be read while this screen is open: keep it on.
-    val view = LocalView.current
-    DisposableEffect(state.running) {
-        view.keepScreenOn = state.running
-        onDispose { view.keepScreenOn = false }
+        if (state.loaded && state.rows.isNotEmpty()) gate { askNotifications(); vm.start(url) }
     }
 
     Scaffold(
@@ -82,7 +74,7 @@ fun ShareScreen(vm: ShareViewModel, url: String, onDone: () -> Unit) {
                     when {
                         state.running -> {
                             Text("Sending ${state.current + 1} of $total", style = MaterialTheme.typography.titleSmallEmphasized)
-                            Text("Keep this screen open until it's done", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("You can switch apps: it goes on in the background", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             LinearWavyProgressIndicator(
                                 progress = { if (total == 0) 0f else (state.current.coerceAtLeast(0) + fraction) / total },
                                 modifier = Modifier.fillMaxWidth(),

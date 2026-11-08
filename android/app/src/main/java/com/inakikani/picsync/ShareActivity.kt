@@ -21,8 +21,9 @@ import com.inakikani.picsync.ui.ShareViewModel
 /**
  * "pic-sync" in the Android share sheet (Google Photos, Files, Drive, …): uploads the
  * shared files to the Mac. The gallery's "Upload files…" opens it too, with the
- * picked files. Shared files can only be read while this screen is open, so it
- * stays open (screen on) until the upload is done.
+ * picked files. The upload goes on in the background (UploadService) when the user
+ * switches apps. The read access to shared files lasts while this activity exists, so
+ * removing it from Recents stops the upload.
  */
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

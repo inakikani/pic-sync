@@ -138,6 +138,8 @@ func runCLI(configPath string, debugLog bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	st := newStore(cfg.UploadDir)
+	st.awake = newAwake(awakeIdle)
+	defer st.awake.close()
 	dirs, _ := cfg.folders() // checked by loadConfig
 	st.SetFolders(dirs)
 	err = serve(ctx, ln, newStoreMux(st))
@@ -226,6 +228,8 @@ func newStoreMux(st *store) *http.ServeMux {
 func handleUpload(w http.ResponseWriter, r *http.Request, st *store) {
 	t := st.act.begin(r.ContentLength)
 	defer st.act.end(t)
+	st.awake.begin()
+	defer st.awake.end()
 	client := clientIP(r)
 	mr, err := r.MultipartReader()
 	if err != nil {

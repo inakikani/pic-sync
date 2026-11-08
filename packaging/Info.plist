@@ -20,6 +20,9 @@
 	<string>12.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<!-- No App Nap: it throttles background apps, and uploads arrive while pic-sync has no window. -->
+	<key>NSAppSleepDisabled</key>
+	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>pic-sync receives photos from your phone over the local network.</string>
 </dict>

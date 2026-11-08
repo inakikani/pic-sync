@@ -52,6 +52,31 @@ fun rememberLocalNetworkGate(onDenied: () -> Unit): (() -> Unit) -> Unit {
     }
 }
 
+// ---- notifications ----
+
+private var askedNotifications = false
+
+/**
+ * Returns a function that asks, once per app run, to show notifications: the upload
+ * progress notification (with Cancel) while pic-sync is in the background. Uploads
+ * work either way; without it the notification is just hidden.
+ */
+@Composable
+fun rememberNotificationRequest(): () -> Unit {
+    val ctx = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        AppLog.i("permissions: notifications ${if (granted) "granted" else "denied (uploads run without a progress notification)"}")
+    }
+    return {
+        if (!askedNotifications &&
+            ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askedNotifications = true
+            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
 // ---- photos and videos ----
 
 enum class MediaAccess { FULL, PARTIAL, NONE }

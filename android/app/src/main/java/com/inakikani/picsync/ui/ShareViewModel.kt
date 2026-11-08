@@ -9,11 +9,14 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.inakikani.picsync.UploadService
 import com.inakikani.picsync.data.AppLog
 import com.inakikani.picsync.data.MediaRepository
+import com.inakikani.picsync.data.ProgressSteps
 import com.inakikani.picsync.data.ServerClient
 import com.inakikani.picsync.data.UploadRecord
 import com.inakikani.picsync.data.UploadStore
+import com.inakikani.picsync.data.UploadTasks
 import com.inakikani.picsync.data.statusText
 import com.inakikani.picsync.data.explain
 import com.inakikani.picsync.data.matchShared
@@ -114,6 +117,8 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
         if (rows.isEmpty()) return
         AppLog.i("share: sending ${rows.size} item(s) to $url")
         _state.update { it.copy(running = true) }
+        // Keeps sending when the user switches apps or the screen turns off.
+        val background = UploadService.begin(getApplication<Application>(), "Sending to the Mac", ::cancel)
         job = viewModelScope.launch {
             val client = ServerClient(url, userAgent)
             val canMatch = mediaAccess(getApplication<Application>()) != MediaAccess.NONE
@@ -123,7 +128,8 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
                     _fraction.value = 0f
                     setRow(i) { it.copy(status = ShareStatus.SENDING) }
                     _state.update { it.copy(current = i) }
-                    sendOne(client, url, i, rows[i].item, canMatch)
+                    background.progress(i, rows.size, rows[i].item.name, 0f)
+                    sendOne(client, url, i, rows.size, rows[i].item, canMatch, background)
                 }
             } catch (e: CancellationException) {
                 cancelled = true
@@ -131,18 +137,36 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 finish(cancelled)
             }
+        }.also { job ->
+            // Not in finally: that doesn't run if the job is cancelled before it starts.
+            job.invokeOnCompletion { background.end() }
         }
     }
 
-    private suspend fun sendOne(client: ServerClient, url: String, i: Int, item: SharedItem, canMatch: Boolean) {
+    private suspend fun sendOne(
+        client: ServerClient,
+        url: String,
+        i: Int,
+        total: Int,
+        item: SharedItem,
+        canMatch: Boolean,
+        background: UploadTasks.Task,
+    ) {
         val started = System.nanoTime()
         try {
             val result = withContext(Dispatchers.IO) {
                 val ctx = coroutineContext
                 val input = resolver.openInputStream(item.uri) ?: throw IOException("can't open the shared file")
                 input.use {
+                    val steps = ProgressSteps()
                     client.upload(it, item.name, item.mimeType, item.takenAt, onProgress = { sent ->
-                        item.size?.takeIf { s -> s > 0 }?.let { s -> _fraction.value = (sent.toFloat() / s).coerceIn(0f, 1f) }
+                        item.size?.takeIf { s -> s > 0 }?.let { s ->
+                            val f = (sent.toFloat() / s).coerceIn(0f, 1f)
+                            if (steps.next(f)) {
+                                _fraction.value = f
+                                background.progress(i, total, item.name, f)
+                            }
+                        }
                     }, checkCancelled = { ctx.ensureActive() })
                 }
             }

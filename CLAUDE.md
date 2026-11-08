@@ -1,8 +1,8 @@
 # pic-sync
 
 A LAN tool to move photos and videos from a phone to a Mac. It has two parts:
-- **Server (Go, repo root):** a single binary with a CLI mode, plus a macOS app mode with a menu bar item. It streams uploads to a folder chosen by file type (`routing.go`: photos → `upload_dir`, plus optional folders for videos/documents/other and per-extension rules), detects duplicates by SHA-256 within that folder, and sets each file's date from its EXIF or video header.
-- **Android app (`android/`):** Kotlin/Compose, Material 3 Expressive, minSdk 33, targetSdk 37. It has a gallery of the phone's photos and uploads them with hash verification. Verified uploads can be moved to trash. Other files can be sent from the share sheet or **Upload files** (both use `ShareActivity`). It also has a full-screen viewer.
+- **Server (Go, repo root):** a single binary with a CLI mode, plus a macOS app mode with a menu bar item. It streams uploads to a folder chosen by file type (`routing.go`: photos → `upload_dir`, plus optional folders for videos/documents/other and per-extension rules), detects duplicates by SHA-256 within that folder, and sets each file's date from its EXIF or video header. On a Mac it runs `caffeinate -i` while uploads are in progress and for 5 minutes after (`awake.go`), so idle sleep doesn't cut off uploads.
+- **Android app (`android/`):** Kotlin/Compose, Material 3 Expressive, minSdk 33, targetSdk 37. It has a gallery of the phone's photos and uploads them with hash verification. Uploads keep running in the background: they still run in the view models, which register with `UploadService` (a dataSync foreground service with a progress notification and wake lock); the testable bookkeeping is in `UploadTasks`. Verified uploads can be moved to trash. Other files can be sent from the share sheet or **Upload files** (both use `ShareActivity`). It also has a full-screen viewer.
 
 User docs: `README.md`. Logs and fixes: `docs/troubleshooting.md`. **Performance rules: `docs/performance.md`, which must be followed.**
 

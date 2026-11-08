@@ -17,6 +17,13 @@
          app can read them, so uploads would arrive on the Mac without location. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
+    <!-- Uploads continue in the background (UploadService): a foreground service with a
+         progress notification, and a wake lock so they also go on with the screen off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Optional special access, granted by the user in Settings:
          lets batch trash requests complete without the system confirmation. -->
     <uses-permission
@@ -45,6 +52,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".UploadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- "pic-sync" in the share sheet (Google Photos, Files, Drive, …): sends the shared
              files to the Mac, which saves each type to its own folder. Shares without a

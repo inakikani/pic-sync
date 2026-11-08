@@ -46,7 +46,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -95,7 +94,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
@@ -146,14 +144,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
         }
     }
 
-    // Uploads only run while the app is open, so keep the screen on meanwhile.
-    val view = LocalView.current
-    val uploading = state.upload != null
-    DisposableEffect(uploading) {
-        view.keepScreenOn = uploading
-        onDispose { view.keepScreenOn = false }
-    }
-
+    val askNotifications = rememberNotificationRequest()
     val networkGate = rememberLocalNetworkGate {
         vm.showMessage("pic-sync needs the Nearby devices (local network) permission to reach your Mac")
     }
@@ -212,7 +203,7 @@ fun GalleryScreen(vm: AppViewModel, state: UiState) {
                 uploadFraction = vm.uploadFraction.collectAsStateWithLifecycle(),
                 onSelectNotUploaded = vm::selectNotUploaded,
                 onClear = vm::clearSelection,
-                onUpload = { networkGate { vm.uploadSelected() } },
+                onUpload = { networkGate { askNotifications(); vm.uploadSelected() } },
                 onCancel = vm::cancelUpload,
                 onTrash = { if (vm.canManageMedia()) { confirmTrash = true } else { runTrash() } },
                 onShowFailures = { showFailures = true },
