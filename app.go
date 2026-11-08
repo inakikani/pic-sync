@@ -331,7 +331,10 @@ func chooseFolder(defaultDir string) (string, error) {
 	return chooseFolderFor(catPhotos, defaultDir)
 }
 
-// chooseFolderFor asks where files of category c should be saved.
+// chooseFolderFor asks where files of category c should be saved. The scripts
+// deliberately don't "activate": pic-sync is a menu bar app, never the frontmost
+// one, and from the background "activate" took about 2 s before the picker
+// appeared (0.7 s without it). Without it the picker still shows in front.
 func chooseFolderFor(c category, defaultDir string) (string, error) {
 	prompt := "Where should " + strings.ToLower(c.label()) + " from your phone be saved?"
 	if c == catOther {
@@ -339,12 +342,10 @@ func chooseFolderFor(c category, defaultDir string) (string, error) {
 	}
 	if info, err := os.Stat(defaultDir); defaultDir != "" && err == nil && info.IsDir() {
 		return osascript(`on run argv
-	activate
 	return POSIX path of (choose folder with prompt (item 1 of argv) default location (POSIX file (item 2 of argv)))
 end run`, prompt, defaultDir)
 	}
 	return osascript(`on run argv
-	activate
 	return POSIX path of (choose folder with prompt (item 1 of argv))
 end run`, prompt)
 }
