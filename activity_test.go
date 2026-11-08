@@ -133,12 +133,12 @@ func TestActivityDailyCountersReset(t *testing.T) {
 	}
 }
 
-func TestSetDirRedirectsNewUploads(t *testing.T) {
+func TestPhotosFolderChangeRedirectsNewUploads(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	st := newStore(first)
 	mux := newStoreMux(st)
 	decodeSaved(t, uploadTo(t, mux, upFile{"one.jpg", "1"}))
-	st.SetDir(second)
+	st.SetFolders(st.Folders().with(catPhotos, second))
 	decodeSaved(t, uploadTo(t, mux, upFile{"two.jpg", "2"}))
 	if _, err := os.Stat(filepath.Join(first, "one.jpg")); err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestHashCacheDroppedOnFolderChange(t *testing.T) {
 	if len(st.cache) != 1 {
 		t.Fatalf("cache has %d entries, want 1", len(st.cache))
 	}
-	st.SetDir(b)
+	st.SetFolders(st.Folders().with(catPhotos, b))
 	if _, err := st.save("two.jpg", "", strings.NewReader("second"), time.Time{}); err != nil {
 		t.Fatal(err)
 	}

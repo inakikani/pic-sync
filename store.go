@@ -90,18 +90,12 @@ func newStore(dir string) *store {
 	return &store{dirs: folders{Photos: dir}, cache: map[string]hashEntry{}, act: newActivity(), temps: map[string]struct{}{}}
 }
 
-// Dir returns the photos folder (upload_dir).
-func (s *store) Dir() string { return s.Folders().Photos }
-
 // Folders returns where uploads currently go.
 func (s *store) Folders() folders {
 	s.dirMu.RLock()
 	defer s.dirMu.RUnlock()
 	return s.dirs
 }
-
-// SetDir switches the photos folder (and every category that uses it).
-func (s *store) SetDir(dir string) { s.SetFolders(s.Folders().with(catPhotos, dir)) }
 
 // SetFolders switches where uploads go; uploads already in progress finish in
 // their old folder. Cached hashes of folders no longer used are dropped.

@@ -32,7 +32,7 @@ Copy `pic-sync.app` anywhere (e.g. `/Applications`) and open it. It asks for a d
 - **↑ 45%**, **↑ 12.3 MB** or **↑ 3 files**: receiving
 - **!**: an upload failed (opening the menu shows the error and clears it)
 
-The menu shows today's count (e.g. *Today: 148 received, 3 already on Mac · last 2 min ago*) and the last error. It also has **Show QR code…**, **Open QR page in browser**, **Open folder** (the photos folder), **Folders**, **Open log** and **Quit pic-sync**. **Folders** lists where [each type of file](#file-types-and-folders) goes. Each type has **Choose Folder…**, **Same as Photos** (not for photos) and **Open in Finder**; changes take effect immediately. The QR page is only served to the Mac itself.
+The menu shows today's count (e.g. *Today: 148 received, 3 already on Mac · last 2 min ago*) and the last error. It also has **Show QR code…**, **Open QR page in browser**, **Folders**, **Open log** and **Quit pic-sync**. **Folders** lists where [each type of file](#file-types-and-folders) goes. Each type has **Choose Folder…**, **Same as Photos** (not for photos) and **Open in Finder**; changes take effect immediately. The QR page is only served to the Mac itself.
 
 The menu bar item needs cgo, so build on a Mac with the Xcode command line tools. A cross-compiled app shows a plain window with the QR code and **Open in browser** / **Stop** buttons instead.
 

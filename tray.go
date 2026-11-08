@@ -44,7 +44,6 @@ func (t *trayApp) onReady() {
 	mQR := systray.AddMenuItem("Show QR code…", "Show the code to scan with your phone")
 	mBrowser := systray.AddMenuItem("Open QR page in browser", "A larger QR code in your browser")
 	systray.AddSeparator()
-	mFolder := systray.AddMenuItem("", "Open the photos folder in Finder")
 	// "Folders" submenu: one entry per category, each with its own submenu. Every
 	// action is a single click: at most one window (the folder picker), since each
 	// osascript window takes a moment to start.
@@ -109,7 +108,6 @@ func (t *trayApp) onReady() {
 		}
 		if f := t.st.Folders(); !foldersShown || !sameFolders(f, lastFolders) {
 			lastFolders, foldersShown = f, true
-			mFolder.SetTitle("Open folder: " + shortPath(f.Photos))
 			for i, c := range categories {
 				catItems[i].SetTitle(c.label() + ": " + f.describeFolder(c))
 				if samePhotos[i] != nil {
@@ -142,8 +140,6 @@ func (t *trayApp) onReady() {
 				go t.showQR()
 			case <-mBrowser.ClickedCh:
 				openBrowser(t.statusURL)
-			case <-mFolder.ClickedCh:
-				openPath(t.st.Dir())
 			case <-mLog.ClickedCh:
 				openPath(logFilePath)
 			case click := <-clicks:
