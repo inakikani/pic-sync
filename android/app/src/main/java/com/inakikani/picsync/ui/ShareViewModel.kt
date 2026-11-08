@@ -4,22 +4,26 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.inakikani.picsync.PicSyncApp
 import com.inakikani.picsync.UploadService
 import com.inakikani.picsync.data.AppLog
+import com.inakikani.picsync.data.FileOutcome
+import com.inakikani.picsync.data.MediaItem
 import com.inakikani.picsync.data.MediaRepository
 import com.inakikani.picsync.data.ProgressSteps
 import com.inakikani.picsync.data.ServerClient
 import com.inakikani.picsync.data.UploadRecord
-import com.inakikani.picsync.data.UploadStore
+import com.inakikani.picsync.data.UploadResult
 import com.inakikani.picsync.data.UploadTasks
-import com.inakikani.picsync.data.statusText
+import com.inakikani.picsync.data.batchSummary
 import com.inakikani.picsync.data.explain
 import com.inakikani.picsync.data.matchShared
+import com.inakikani.picsync.data.statusText
+import com.inakikani.picsync.data.uploadVerified
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,9 +69,8 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = MediaRepository(resolver) {
         app.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
-    private val store = UploadStore(app)
-    private val userAgent =
-        "pic-sync-android/${appVersion(app)} (Android ${Build.VERSION.RELEASE}; ${Build.MANUFACTURER} ${Build.MODEL})"
+    private val store = (app as PicSyncApp).uploadStore
+    private val userAgent = picSyncUserAgent(app)
 
     private val _state = MutableStateFlow(ShareState())
     val state = _state.asStateFlow()
@@ -153,81 +156,92 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
         background: UploadTasks.Task,
     ) {
         val started = System.nanoTime()
-        try {
-            val result = withContext(Dispatchers.IO) {
+        var match: Pair<MediaItem?, String> = null to "not looked up"
+        val outcome = try {
+            withContext(Dispatchers.IO) {
                 val ctx = coroutineContext
-                val input = resolver.openInputStream(item.uri) ?: throw IOException("can't open the shared file")
-                input.use {
-                    val steps = ProgressSteps()
-                    client.upload(it, item.name, item.mimeType, item.takenAt, onProgress = { sent ->
-                        item.size?.takeIf { s -> s > 0 }?.let { s ->
-                            val f = (sent.toFloat() / s).coerceIn(0f, 1f)
-                            if (steps.next(f)) {
-                                _fraction.value = f
-                                background.progress(i, total, item.name, f)
-                            }
+                uploadVerified(
+                    upload = {
+                        val input = resolver.openInputStream(item.uri) ?: throw IOException("can't open the shared file")
+                        input.use {
+                            val steps = ProgressSteps()
+                            client.upload(it, item.name, item.mimeType, item.takenAt, onProgress = { sent ->
+                                item.size?.takeIf { s -> s > 0 }?.let { s ->
+                                    val f = (sent.toFloat() / s).coerceIn(0f, 1f)
+                                    if (steps.next(f)) {
+                                        _fraction.value = f
+                                        background.progress(i, total, item.name, f)
+                                    }
+                                }
+                            }, checkCancelled = { ctx.ensureActive() })
                         }
-                    }, checkCancelled = { ctx.ensureActive() })
-                }
-            }
-            val ms = (System.nanoTime() - started) / 1_000_000
-            if (!result.verified) {
-                AppLog.e(
-                    "share: ${item.name} NOT verified: sent ${result.local.bytes} bytes sha256 ${result.local.sha256}, " +
-                        "Mac reported ${result.saved.size} bytes sha256 ${result.saved.sha256}",
-                )
-                setRow(i) { it.copy(status = ShareStatus.FAILED, detail = "the Mac didn't receive identical bytes") }
-                return
-            }
-            // Link it to the phone's own photo, so the gallery can trash it later.
-            // Other files (documents, …) are never in the photo library: don't look.
-            val match = if (!item.isMedia) {
-                null to "not a photo or video"
-            } else if (!canMatch) {
-                null to "no photo access, so it can't be found in the phone's library"
-            } else {
-                withContext(Dispatchers.IO) {
-                    matchShared(repo.withSize(result.local.bytes), result.local) { candidate ->
-                        runCatching { repo.hash(candidate) }.getOrNull()
-                    }
-                }
-            }
-            val phoneItem = match.first
-            if (phoneItem != null) {
-                withContext(Dispatchers.IO) {
-                    store.put(
-                        UploadRecord(
-                            mediaId = phoneItem.id,
-                            snapshot = phoneItem.snapshot,
-                            bytes = result.local.bytes,
-                            sha256 = result.local.sha256,
-                            serverName = result.saved.name,
-                            serverUrl = url,
-                            uploadedAt = System.currentTimeMillis(),
-                        ),
-                    )
-                }
-            }
-            AppLog.i(
-                "share: ${item.name} (${result.local.bytes} bytes, $ms ms) " +
-                    (if (result.saved.duplicate) "already on Mac as ${result.saved.name}" else "saved as ${result.saved.name}") +
-                    " in ${result.saved.folder.ifEmpty { "?" }}" +
-                    ", verified; phone library: " +
-                    (phoneItem?.let { "matched id ${it.id} (${it.name})" } ?: "no match: ${match.second}"),
-            )
-            setRow(i) {
-                it.copy(
-                    status = if (result.saved.duplicate) ShareStatus.DUPLICATE else ShareStatus.SAVED,
-                    detail = result.saved.statusText(),
-                    onPhone = if (item.isMedia) phoneItem != null else null,
+                    },
+                    // Link it to the phone's own photo, so the gallery can trash it later.
+                    record = { result ->
+                        match = findOnPhone(item, result, canMatch)
+                        match.first?.let { phoneItem ->
+                            store.put(
+                                UploadRecord(
+                                    mediaId = phoneItem.id,
+                                    snapshot = phoneItem.snapshot,
+                                    bytes = result.local.bytes,
+                                    sha256 = result.local.sha256,
+                                    serverName = result.saved.name,
+                                    serverUrl = url,
+                                    uploadedAt = System.currentTimeMillis(),
+                                ),
+                            )
+                        }
+                    },
                 )
             }
         } catch (e: CancellationException) {
             setRow(i) { it.copy(status = ShareStatus.WAITING) }
             throw e
-        } catch (e: Exception) {
-            AppLog.w("share: ${item.name} failed", e)
-            setRow(i) { it.copy(status = ShareStatus.FAILED, detail = e.explain()) }
+        }
+        val ms = (System.nanoTime() - started) / 1_000_000
+        when (outcome) {
+            is FileOutcome.Verified -> {
+                val result = outcome.result
+                val phoneItem = match.first
+                AppLog.i(
+                    "share: ${item.name} (${result.local.bytes} bytes, $ms ms) " +
+                        (if (result.saved.duplicate) "already on Mac as ${result.saved.name}" else "saved as ${result.saved.name}") +
+                        " in ${result.saved.folder.ifEmpty { "?" }}" +
+                        ", verified; phone library: " +
+                        (phoneItem?.let { "matched id ${it.id} (${it.name})" } ?: "no match: ${match.second}"),
+                )
+                setRow(i) {
+                    it.copy(
+                        status = if (result.saved.duplicate) ShareStatus.DUPLICATE else ShareStatus.SAVED,
+                        detail = result.saved.statusText(),
+                        onPhone = if (item.isMedia) phoneItem != null else null,
+                    )
+                }
+            }
+            is FileOutcome.NotVerified -> AppLog.e(
+                "share: ${item.name} NOT verified: sent ${outcome.result.local.bytes} bytes sha256 ${outcome.result.local.sha256}, " +
+                    "Mac reported ${outcome.result.saved.size} bytes sha256 ${outcome.result.saved.sha256}",
+            )
+            is FileOutcome.Failed -> AppLog.w("share: ${item.name} failed after $ms ms", outcome.error)
+        }
+        outcome.problem?.let { problem -> setRow(i) { it.copy(status = ShareStatus.FAILED, detail = problem) } }
+    }
+
+    /**
+     * The phone's own photo with exactly the uploaded bytes, and why there is none. Other files
+     * (documents, …) are never in the photo library, so they aren't looked up. Blocking.
+     */
+    private fun findOnPhone(item: SharedItem, result: UploadResult, canMatch: Boolean): Pair<MediaItem?, String> = when {
+        !item.isMedia -> null to "not a photo or video"
+        !canMatch -> null to "no photo access, so it can't be found in the phone's library"
+        else -> try {
+            matchShared(repo.withSize(result.local.bytes), result.local) { candidate ->
+                runCatching { repo.hash(candidate) }.getOrNull()
+            }
+        } catch (e: Exception) { // the upload itself is fine; it just can't be trashed from the gallery
+            AppLog.w("share: searching the library for ${item.name} failed", e)
+            null to "couldn't search the phone's library: ${e.explain()}"
         }
     }
 
@@ -237,11 +251,7 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
         val dup = rows.count { it.status == ShareStatus.DUPLICATE }
         val failed = rows.count { it.status == ShareStatus.FAILED }
         val onPhone = rows.count { it.onPhone == true }
-        val summary = buildList {
-            add("$saved sent")
-            if (dup > 0) add("$dup already on Mac")
-            if (failed > 0) add("$failed failed")
-        }.joinToString(", ").let { if (cancelled) "Cancelled: $it" else it } +
+        val summary = batchSummary("sent", saved, dup, failed, cancelled) +
             if (onPhone > 0) ". $onPhone can be moved to trash from pic-sync." else "."
         AppLog.i("share: done: $summary")
         _state.update { it.copy(running = false, finished = true, current = -1, summary = summary) }
@@ -259,9 +269,5 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun setRow(i: Int, change: (ShareRow) -> ShareRow) = _state.update { s ->
         s.copy(rows = s.rows.toMutableList().also { it[i] = change(it[i]) })
-    }
-
-    override fun onCleared() {
-        store.close()
     }
 }

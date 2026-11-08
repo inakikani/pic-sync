@@ -17,6 +17,10 @@ fun appVersion(ctx: Context): String = runCatching {
     "${info.versionName} (${info.longVersionCode})"
 }.getOrDefault("?")
 
+/** Sent as User-Agent, so the Mac's log shows which app and phone connected. */
+fun picSyncUserAgent(ctx: Context): String =
+    "pic-sync-android/${appVersion(ctx)} (Android ${Build.VERSION.RELEASE}; ${Build.MANUFACTURER} ${Build.MODEL})"
+
 /** One line with everything that decides what the app may do. Logged at start and in diagnostics. */
 fun environmentLine(ctx: Context): String =
     "app ${appVersion(ctx)}, Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), " +

@@ -19,7 +19,10 @@ data class UploadRecord(
     val uploadedAt: Long,        // millis since epoch
 )
 
-/** SQLite table of verified uploads. Blocking: call from a background thread. */
+/**
+ * SQLite table of verified uploads. Blocking: call from a background thread. Use the one
+ * shared instance, `PicSyncApp.uploadStore`.
+ */
 class UploadStore(context: Context) :
     SQLiteOpenHelper(context, "uploads.db", null, 1) {
 
@@ -38,6 +41,8 @@ class UploadStore(context: Context) :
         )
     }
 
+    // Version 1 is the only schema so far. A schema change must bump the version above and
+    // migrate here: these records are what allows trashing, so they must never be dropped.
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
     fun put(r: UploadRecord) {

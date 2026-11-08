@@ -7,17 +7,17 @@ import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.net.Uri
-import android.os.Build
 import android.provider.MediaStore
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.inakikani.picsync.PicSyncApp
 import com.inakikani.picsync.UploadService
 import com.inakikani.picsync.data.Album
 import com.inakikani.picsync.data.AppLog
+import com.inakikani.picsync.data.FileOutcome
 import com.inakikani.picsync.data.MediaFilters
 import com.inakikani.picsync.data.MediaItem
 import com.inakikani.picsync.data.MediaRepository
@@ -26,13 +26,13 @@ import com.inakikani.picsync.data.ProgressSteps
 import com.inakikani.picsync.data.ServerClient
 import com.inakikani.picsync.data.Settings
 import com.inakikani.picsync.data.UploadRecord
-import com.inakikani.picsync.data.UploadResult
-import com.inakikani.picsync.data.UploadStore
-import com.inakikani.picsync.data.changedSinceUpload
+import com.inakikani.picsync.data.batchSummary
 import com.inakikani.picsync.data.explain
 import com.inakikani.picsync.data.groupAlbums
 import com.inakikani.picsync.data.normalizeServerUrl
+import com.inakikani.picsync.data.planTrash
 import com.inakikani.picsync.data.toggleMonthSelection
+import com.inakikani.picsync.data.uploadVerified
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -141,9 +141,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = MediaRepository(resolver) {
         app.checkSelfPermission(Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
-    private val store = UploadStore(app)
+    private val store = (app as PicSyncApp).uploadStore
     private val settings = Settings(app)
-    private val userAgent = "pic-sync-android/${appVersion(app)} (Android ${Build.VERSION.RELEASE}; ${Build.MANUFACTURER} ${Build.MODEL})"
+    private val userAgent = picSyncUserAgent(app)
 
     // Thumbnails are ~300-400 KB each, so the cache is bounded by bytes, not by count:
     // 1/8 of the app's heap limit, at most 48 MB. It's emptied when the app is in the background.
@@ -346,58 +346,66 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(upload = UploadProgress(i, items.size, item.id)) }
                     background.progress(i, items.size, item.name, 0f)
                     val fileStart = System.nanoTime()
-                    try {
-                        val (result, opened) = uploadOne(client, item) { sent ->
-                            val f = if (item.size > 0) (sent.toFloat() / item.size).coerceIn(0f, 1f) else 0f
-                            if (steps.next(f)) {
-                                _uploadFraction.value = f
-                                background.progress(i, items.size, item.name, f)
-                            }
-                        }
-                        val took = ms(fileStart)
-                        val where = "${item.name} (id ${item.id}, ${mb(result.local.bytes)}, ${took} ms" +
-                            "${speed(result.local.bytes, took)})"
-                        val location = if (opened.withLocation) "location kept" else "WITHOUT location: ${opened.whyNoLocation}"
-                        if (result.verified) {
+                    var opened: Opened? = null
+                    var rec: UploadRecord? = null
+                    val outcome = withContext(Dispatchers.IO) {
+                        val ctx = coroutineContext
+                        uploadVerified(
+                            upload = {
+                                val o = repo.open(item).also { opened = it }
+                                o.stream.use {
+                                    client.upload(it, item.name, item.mimeType, item.takenAt, onProgress = { sent ->
+                                        val f = if (item.size > 0) (sent.toFloat() / item.size).coerceIn(0f, 1f) else 0f
+                                        if (steps.next(f)) {
+                                            _uploadFraction.value = f
+                                            background.progress(i, items.size, item.name, f)
+                                        }
+                                    }, checkCancelled = { ctx.ensureActive() })
+                                }
+                            },
+                            record = { result ->
+                                rec = UploadRecord(
+                                    mediaId = item.id,
+                                    snapshot = item.snapshot,
+                                    bytes = result.local.bytes,
+                                    sha256 = result.local.sha256,
+                                    serverName = result.saved.name,
+                                    serverUrl = url,
+                                    uploadedAt = System.currentTimeMillis(),
+                                ).also(store::put)
+                            },
+                        )
+                    }
+                    val took = ms(fileStart)
+                    when (outcome) {
+                        is FileOutcome.Verified -> {
+                            val result = outcome.result
+                            val location = opened?.let { if (it.withLocation) "location kept" else "WITHOUT location: ${it.whyNoLocation}" }
                             AppLog.i(
-                                "upload: $where " +
+                                "upload: ${item.name} (id ${item.id}, ${mb(result.local.bytes)}, $took ms${speed(result.local.bytes, took)}) " +
                                     (if (result.saved.duplicate) "already on Mac as ${result.saved.name}" else "saved as ${result.saved.name}") +
                                     ", verified, $location",
                             )
-                            val rec = UploadRecord(
-                                mediaId = item.id,
-                                snapshot = item.snapshot,
-                                bytes = result.local.bytes,
-                                sha256 = result.local.sha256,
-                                serverName = result.saved.name,
-                                serverUrl = url,
-                                uploadedAt = System.currentTimeMillis(),
-                            )
-                            withContext(Dispatchers.IO) { store.put(rec) }
                             if (result.saved.duplicate) dup++ else ok++
+                            val record = rec!! // set by uploadVerified for every verified upload
                             _state.update {
                                 it.copy(
-                                    records = it.records + (item.id to rec),
+                                    records = it.records + (item.id to record),
                                     failed = it.failed - item.id,
                                     selected = it.selected - item.id,
                                 )
                             }
-                        } else {
-                            AppLog.e(
-                                "upload: $where NOT verified: sent ${result.local.bytes} bytes sha256 ${result.local.sha256}, " +
-                                    "Mac reported ${result.saved.size} bytes sha256 ${result.saved.sha256}",
-                            )
-                            failed++
-                            val msg = "${item.name}: the Mac didn't receive identical bytes"
-                            firstError = firstError ?: msg
-                            _state.update { it.copy(failed = it.failed + (item.id to msg)) }
                         }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        AppLog.w("upload: ${item.name} (id ${item.id}) failed after ${ms(fileStart)} ms", e)
+                        is FileOutcome.NotVerified -> AppLog.e(
+                            "upload: ${item.name} (id ${item.id}) NOT verified: sent ${outcome.result.local.bytes} bytes " +
+                                "sha256 ${outcome.result.local.sha256}, Mac reported ${outcome.result.saved.size} bytes " +
+                                "sha256 ${outcome.result.saved.sha256}",
+                        )
+                        is FileOutcome.Failed -> AppLog.w("upload: ${item.name} (id ${item.id}) failed after $took ms", outcome.error)
+                    }
+                    outcome.problem?.let { problem ->
                         failed++
-                        val msg = "${item.name}: ${e.explain()}"
+                        val msg = "${item.name}: $problem"
                         firstError = firstError ?: msg
                         _state.update { it.copy(failed = it.failed + (item.id to msg)) }
                     }
@@ -406,13 +414,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 cancelled = true
                 throw e
             } finally {
-                val parts = buildList {
-                    add("$ok uploaded")
-                    if (dup > 0) add("$dup already on Mac")
-                    if (failed > 0) add("$failed failed")
-                }
-                val summary = (if (cancelled) "Cancelled: " else "") + parts.joinToString(", ") +
-                    (firstError?.let { ". $it" } ?: "")
+                val summary = batchSummary("uploaded", ok, dup, failed, cancelled) + (firstError?.let { ". $it" } ?: "")
                 AppLog.i("upload: done in ${ms(batchStart) / 1000} s: $summary")
                 _state.update { it.copy(upload = null, message = summary) }
             }
@@ -426,20 +428,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         AppLog.i("upload: cancelled by the user")
         uploadJob?.cancel()
     }
-
-    private suspend fun uploadOne(
-        client: ServerClient,
-        item: MediaItem,
-        onProgress: (Long) -> Unit,
-    ): Pair<UploadResult, Opened> =
-        withContext(Dispatchers.IO) {
-            val ctx = coroutineContext
-            val opened = repo.open(item)
-            val result = opened.stream.use {
-                client.upload(it, item.name, item.mimeType, item.takenAt, onProgress, checkCancelled = { ctx.ensureActive() })
-            }
-            result to opened
-        }
 
     // ---- clean up ----
 
@@ -457,37 +445,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         pendingScope = scope.scopeLabel
         _state.update { it.copy(busy = "Checking files…") }
         try {
-            val (uris, skipped) = withContext(Dispatchers.IO) {
-                val media = repo.query().filter(inScope)
-                val records = store.all()
-                val uris = ArrayList<Uri>()
-                var skipped = 0
-                for (item in media) {
-                    if (item.id in excluded) continue // long-pressed: protected from trashing
-                    val rec = records[item.id] ?: continue
-                    if (!changedSinceUpload(rec.snapshot, item.snapshot)) {
-                        uris += item.uri
-                        continue
-                    }
-                    val now = try {
+            val plan = withContext(Dispatchers.IO) {
+                val plan = planTrash(repo.query(), store.all(), excluded, inScope) { item ->
+                    try {
                         repo.hash(item)
                     } catch (e: Exception) {
                         AppLog.w("trash: re-hashing ${item.name} (id ${item.id}) failed, skipping it", e)
                         null
                     }
-                    if (now != null && now.bytes == rec.bytes && now.sha256 == rec.sha256) {
-                        store.put(rec.copy(snapshot = item.snapshot)) // same bytes, just new metadata
-                        uris += item.uri
-                    } else {
-                        // Edited after upload (the Mac doesn't have this version), or read with a
-                        // different location setting than when it was uploaded.
-                        if (now != null) AppLog.i("trash: skipping ${item.name} (id ${item.id}): bytes differ from the upload")
-                        skipped++
-                    }
                 }
-                AppLog.i("trash: ${uris.size} to move, $skipped skipped, ${excluded.size} protected by skip, scope '${scope.scopeLabel.trim()}'")
-                uris to skipped
+                plan.refreshed.forEach(store::put) // same bytes, just new metadata
+                // Edited after upload (the Mac doesn't have this version), read with a different
+                // location setting than when it was uploaded, or unreadable.
+                plan.skipped.forEach { AppLog.i("trash: skipping ${it.name} (id ${it.id}): changed since the upload") }
+                AppLog.i(
+                    "trash: ${plan.trash.size} to move, ${plan.skipped.size} skipped, " +
+                        "${excluded.size} protected by skip, scope '${scope.scopeLabel.trim()}'",
+                )
+                plan
             }
+            val uris = plan.trash.map { it.uri }
+            val skipped = plan.skipped.size
             pendingTrash = uris.size
             pendingSkipped = skipped
             if (uris.isEmpty()) {
@@ -526,7 +504,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         getApplication<Application>().unregisterComponentCallbacks(memoryCallbacks)
         thumbs.evictAll()
-        store.close()
     }
 }
 

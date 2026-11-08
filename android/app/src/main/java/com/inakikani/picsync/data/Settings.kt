@@ -19,6 +19,10 @@ class Settings(context: Context) {
     var excluded: Set<Long>
         get() = prefs.getStringSet("excluded_ids", emptySet()).orEmpty()
             .mapNotNullTo(HashSet()) { it.toLongOrNull() }
-        // commit(), not apply(): this protects files from trashing, so write it before going on.
-        set(value) { prefs.edit().putStringSet("excluded_ids", value.mapTo(HashSet()) { it.toString() }).commit() }
+        // apply(), not commit(): this runs on the main thread at every long-press, and commit()
+        // would write the whole set to disk there. apply() updates the in-memory copy at once
+        // and writes in the background; Android finishes pending writes before the app's
+        // activities stop, so the protection is on disk before the app can be killed. Trashing
+        // decides from the view model's state, not from here, so it never sees an older set.
+        set(value) { prefs.edit().putStringSet("excluded_ids", value.mapTo(HashSet()) { it.toString() }).apply() }
 }

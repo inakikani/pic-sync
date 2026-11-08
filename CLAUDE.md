@@ -15,6 +15,8 @@ User docs: `README.md`. Logs and fixes: `docs/troubleshooting.md`. **Performance
 - **Android:**
   - The owner builds and tests in their own Android Studio. **Don't install the Android SDK or Gradle in the sandbox.** Write the code, check it carefully, and say it hasn't been compiled.
   - Unit tests: `android/app/src/test` (JVM; `AppLog.logcat` is swapped out because `android.util.Log` isn't available there).
+  - **Safety rules live in plain functions, with tests:** `planTrash` (`data/Trash.kt`) decides what may be moved to trash; `uploadVerified` (`data/Upload.kt`) is the only place an upload gets recorded. Keep those decisions there, not in the view models.
+  - **One `UploadStore`:** use `PicSyncApp.uploadStore`; don't create another.
   - Judge smoothness on the **release** build variant only.
 
 ## Workflow
