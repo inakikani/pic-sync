@@ -5,6 +5,17 @@ APP  := $(BIN)/pic-sync.app
 # Elsewhere the app is built without it and falls back to the "running" window.
 CGO  ?= $(if $(filter Darwin,$(shell uname -s)),1,0)
 
+# Oldest macOS the app runs on (Go 1.25 needs 12.0 or newer). A cgo build is
+# linked by Xcode's clang, which otherwise marks the binary as needing the
+# build Mac's own macOS version (v1.1 needed 27.2 and wouldn't open on
+# Sequoia). The Info.plist's LSMinimumSystemVersion is set to the same value.
+MACOS_MIN := 12.0
+ifeq ($(shell uname -s),Darwin)
+export MACOSX_DEPLOYMENT_TARGET := $(MACOS_MIN)
+export CGO_CFLAGS  := -O2 -g -mmacosx-version-min=$(MACOS_MIN)
+export CGO_LDFLAGS := -O2 -g -mmacosx-version-min=$(MACOS_MIN)
+endif
+
 # Release version, e.g. `make release VERSION=1.2`. Defaults to the latest
 # git tag without its leading "v" (tag v1.2 -> 1.2).
 VERSION ?= $(patsubst v%,%,$(shell git describe --tags --abbrev=0 2>/dev/null))
@@ -39,9 +50,13 @@ universal:
 	cp packaging/Info.plist $(APP)/Contents/Info.plist
 	plutil -replace CFBundleShortVersionString -string $(VERSION) $(APP)/Contents/Info.plist
 	plutil -replace CFBundleVersion -string $(VERSION) $(APP)/Contents/Info.plist
+	plutil -replace LSMinimumSystemVersion -string $(MACOS_MIN) $(APP)/Contents/Info.plist
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o $(BIN)/pic-sync-darwin-arm64 .
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o $(BIN)/pic-sync-darwin-amd64 .
 	lipo -create -output $(APP)/Contents/MacOS/pic-sync $(BIN)/pic-sync-darwin-arm64 $(BIN)/pic-sync-darwin-amd64
+	@# Fail if either slice was marked as needing a newer macOS than MACOS_MIN.
+	@mins="$$(vtool -show-build $(APP)/Contents/MacOS/pic-sync | awk '$$1 == "minos" {print $$2}' | sort -u)"; \
+	  test "$$mins" = "$(MACOS_MIN)" || { echo "binary needs macOS $$mins, expected $(MACOS_MIN)"; exit 1; }
 	codesign --force --deep --sign - $(APP)
 
 # Download for GitHub Releases: bin/pic-sync-<VERSION>-macos.zip.

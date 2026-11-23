@@ -40,4 +40,5 @@ User docs: `README.md`. Logs and fixes: `docs/troubleshooting.md`. **Performance
 - **Debug output on Android:** use `AppLog`, not `println`. Logcat filter: `tag:pic-sync`. Startup logs `startup: …` markers.
 - **Material 3 Expressive APIs** come from `material3` 1.5.0-beta02, pinned in `libs.versions.toml` because the BOM pins 1.4.0. `LoadingIndicator` and `MaterialShapes` still need `@OptIn(ExperimentalMaterial3ExpressiveApi::class)`.
 - **Release-only crashes come from R8** (debug builds don't run it). ML Kit's QR scanner crashed in `GmsBarcodeScanning.getClient` because R8 removed the constructor of a class created by reflection. Keep rules go in `android/app/proguard-rules.pro`; decode traces with the mapping file (`docs/troubleshooting.md`).
+- **The Mac app's oldest macOS is `MACOS_MIN` in the `Makefile`.** cgo builds are linked by Xcode's clang, which otherwise marks the binary as needing the build Mac's own macOS (v1.1 needed 27.2 and wouldn't open on Sequoia). `make universal` checks the result with `vtool`.
 - **Icons** are Material Symbols Rounded vector drawables in `res/drawable/ic_*.xml`. There is no icons library.
